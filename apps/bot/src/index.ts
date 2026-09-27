@@ -3,8 +3,9 @@ import { loadConfig } from "./config.js";
 import { classifyTriage, decideModeration, isMedicalQuestion, normalizedText, redactPersonalData } from "./policy.js";
 import { createRuntimeState, incrementMessage, rememberAlert } from "./runtime-store.js";
 
-const config = loadConfig();
+let config = loadConfig();
 const runtime = createRuntimeState();
+let pollingStarted = false;
 
 function messageText(ctx: Context): string | undefined {
   const message = ctx.message;
@@ -67,9 +68,21 @@ function createBot() {
   return bot;
 }
 
+function startPollingWhenConfigured() {
+  config = loadConfig();
+  if (!config.token) {
+    console.info("Telegram token kutilmoqda. Uni adminka orqali saqlang.");
+    return;
+  }
+  if (pollingStarted) return;
+  pollingStarted = true;
+  const bot = createBot();
+  bot.start({ onStart: (info) => console.info(`@${info.username} polling boshlandi`) });
+}
+
 if (config.mode === "mock") {
   console.info("Shifokor bot mock rejimda. Haqiqiy Telegram uchun apps/bot/.env yarating va BOT_MODE=polling qiling.");
 } else {
-  const bot = createBot();
-  bot.start({ onStart: (info) => console.info(`@${info.username} polling boshlandi`) });
+  startPollingWhenConfigured();
+  setInterval(startPollingWhenConfigured, 30_000);
 }
