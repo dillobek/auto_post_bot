@@ -9,7 +9,7 @@ loadEnvironment();
 const schema = z.object({
   BOT_MODE: z.enum(["mock", "polling"]).default("mock"),
   TELEGRAM_BOT_TOKEN: z.string().optional(),
-  DOCTOR_TELEGRAM_ID: z.coerce.number().int().positive().optional(),
+  DOCTOR_TELEGRAM_ID: z.preprocess((value) => value === "" || value === undefined ? undefined : Number(value), z.number().int().positive().optional()),
   TELEGRAM_CHANNEL_ID: z.string().optional(),
   TELEGRAM_GROUP_ID: z.string().optional(),
   ALLOWED_DOMAINS: z.string().default(""),
