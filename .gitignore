@@ -1,5 +1,8 @@
 node_modules/
 .next/
 .env
+.env.*
+apps/bot/node_modules/
+.env
 .env.local
 *.log

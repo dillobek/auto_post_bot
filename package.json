@@ -6,7 +6,10 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "dev:bot": "npm --prefix apps/bot run dev",
+    "check:bot": "npm --prefix apps/bot run check",
+    "test:bot": "npm --prefix apps/bot run test"
   },
   "dependencies": {
     "@types/node": "22.10.2",
