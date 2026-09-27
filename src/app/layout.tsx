@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { isAdminAuthenticated } from "@/lib/admin-auth";
+import { LoginScreen } from "./login-screen";
 
 export const metadata: Metadata = {
   title: "Shifokor | Boshqaruv paneli",
@@ -7,10 +9,11 @@ export const metadata: Metadata = {
   metadataBase: new URL(process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"),
 };
 
-export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+  const authenticated = await isAdminAuthenticated();
   return (
     <html lang="uz">
-      <body>{children}</body>
+      <body>{authenticated ? children : <LoginScreen />}</body>
     </html>
   );
 }

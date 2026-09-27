@@ -6,6 +6,10 @@ export type TelegramSettings = {
   botToken?: string;
   channelId?: string;
   groupId?: string;
+  openAiApiKey?: string;
+  openAiModel?: string;
+  adminUsername?: string;
+  adminPasswordHash?: string;
   updatedAt?: string;
 };
 
@@ -49,5 +53,14 @@ export async function writeTelegramSettings(settings: TelegramSettings): Promise
 }
 
 export function publicTelegramSettings(settings: TelegramSettings) {
-  return { hasBotToken: Boolean(settings.botToken), channelId: settings.channelId ?? "", groupId: settings.groupId ?? "", updatedAt: settings.updatedAt ?? null };
+  return {
+    hasBotToken: Boolean(settings.botToken),
+    channelId: settings.channelId ?? "",
+    groupId: settings.groupId ?? "",
+    hasOpenAiApiKey: Boolean(settings.openAiApiKey),
+    openAiModel: settings.openAiModel ?? "gpt-4.1-mini",
+    adminUsername: settings.adminUsername ?? process.env.ADMIN_USERNAME ?? "",
+    hasCustomAdminPassword: Boolean(settings.adminPasswordHash),
+    updatedAt: settings.updatedAt ?? null,
+  };
 }

@@ -38,3 +38,8 @@ Production compose fayli web interfeysni `127.0.0.1:4300` portida va Telegram wo
 Yoki admin panelning **Sozlamalar → Telegram ulanishi** oynasidan token, kanal va guruhni kiriting. Bunda root `.env` faylida 32 baytli base64 `CONFIG_ENCRYPTION_KEY` bo‘lishi shart. Token `data/telegram-settings.enc` fayliga AES-256-GCM bilan shifrlab yoziladi va Gitga qo‘shilmaydi. Bot worker ham shu kalit bilan ushbu faylni o‘qiydi.
 
 Bot spam havolalari va takroriy xabarlarni moderatsiya qiladi, shifokorga tibbiy savol va xavfli alomatlar haqida private xabar yuboradi. Individual tashxis yoki dori tavsiyasi bermaydi. Guruhga shoshilinch javob faqat operator/shifokor tasdiqlagan `URGENT_GROUP_TEMPLATE` berilganda yuboriladi.
+## Admin kirishi va AI sozlamalari
+
+Production `.env` faylida birinchi kirish uchun `ADMIN_USERNAME` va `ADMIN_PASSWORD` ni bering. Kirgandan so‘ng **Sozlamalar** sahifasida username va passwordni almashtirish mumkin. Telegram tokeni ham, OpenAI API key ham AES-256-GCM bilan shifrlangan `data` volume ichida saqlanadi va UI yoki API orqali qaytarilmaydi.
+
+AI konfiguratsiyasining standart modeli `gpt-4.1-mini`. U tez va tejamkor matnli vazifalar uchun tanlangan; hozirgi botda OpenAI chaqiruvi hali ulanmagan, shuning uchun API key saqlashning o‘zi xarajat chiqarmaydi.
