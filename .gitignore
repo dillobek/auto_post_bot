@@ -2,7 +2,9 @@ node_modules/
 .next/
 .env
 .env.*
+!.env.example
 apps/bot/node_modules/
+data/
 .env
 .env.local
 *.log

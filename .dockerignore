@@ -1,0 +1,10 @@
+.git
+.github
+.next
+node_modules
+apps/bot/node_modules
+data
+.env
+.env.*
+*.log
+design
