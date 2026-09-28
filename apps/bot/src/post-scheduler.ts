@@ -167,9 +167,22 @@ function fallbackContent(topic: string, kind: Exclude<ContentKind, "poll">, open
 
 function telegramHtml(post: string): string {
   const escape = (value: string) => value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  const lines = post.split(/\n+/).map((line) => line.trim()).filter(Boolean);
-  const [headline, ...rest] = lines;
-  return headline ? `<b>${escape(headline)}</b>${rest.length ? `\n\n${escape(rest.join("\n\n"))}` : ""}` : "";
+  const value = post.trim();
+  const firstBreak = value.search(/\n/);
+  if (firstBreak > 0 && firstBreak <= 140) {
+    const headline = value.slice(0, firstBreak).trim();
+    const body = value.slice(firstBreak).trim();
+    return `<b>${escape(headline)}</b>${body ? `\n\n${escape(body)}` : ""}`;
+  }
+  const firstBlockEnd = value.indexOf("\n\n");
+  const firstBlock = firstBlockEnd === -1 ? value : value.slice(0, firstBlockEnd);
+  const sentence = firstBlock.match(/^(.{1,150}?[.!?])(?:\s+)([\s\S]+)$/);
+  if (sentence) {
+    const headline = sentence[1].trim();
+    const body = `${sentence[2].trim()}${firstBlockEnd === -1 ? "" : `\n\n${value.slice(firstBlockEnd + 2).trim()}`}`.trim();
+    return `<b>${escape(headline)}</b>${body ? `\n\n${escape(body)}` : ""}`;
+  }
+  return `<b>${escape(value)}</b>`;
 }
 
 function previousFor(topic: string, kind: ContentKind, history: PostHistory): string {
@@ -188,8 +201,8 @@ async function askOpenAi(config: BotConfig, topic: string, kind: Exclude<Content
       ? "Bu tibbiyot va sun’iy intellekt kesishmasidagi mavzu. AI faqat mavzu nomida aniq berilgan tibbiy vazifa doirasida yozilsin. Tashxis, individual davolash yoki dori dozasi bermang; yakuniy qaror shifokorniki ekanini qisqa va tabiiy ayting."
     : "Bu TIBBIY EMAS mavzu. Sog‘liq, bemor, shifokor, klinika, tashxis, davolash, dori yoki tibbiyotga oid misol va foydani mutlaqo kiritmang. AI yoki AI agent mavzusini texnologiya, ish jarayoni, avtomatlashtirish, mahsuldorlik, xavfsizlik yoki kundalik amaliyot nuqtai nazaridan yoritib bering.";
   const format = kind === "info"
-    ? `Batafsil Telegram ma’lumotini yozing: ${opening ? `birinchi satr aynan shunday boshlansin: “${opening}”` : "birinchi satr diqqatni tortadigan, tabiiy kirish bo‘lsin."} Keyin 3–4 qisqa paragrafda muammo, sabab va amaliy yo‘lni tushuntiring. 650–1 200 belgi bo‘lsin. Muhokama chaqirig‘i, admin kontaktlari, manba, URL, Markdown yoki HTML yozmang.`
-    : "Rasm ostiga qo‘yiladigan 220–420 belgilik qisqa Telegram posti yozing. Birinchi satr odamni to‘xtatib o‘qitadigan tabiiy savol yoki holat bo‘lsin. Keyin bir aniq foyda yoki oddiy misolni 2 qisqa paragrafda ayting. Muhokama chaqirig‘i, admin kontaktlari, manba, URL, Markdown yoki HTML yozmang.";
+    ? `Batafsil Telegram ma’lumotini AIDA shaklida yozing. Format qat’iy: 1) 90 belgidan oshmaydigan bitta Attention sarlavhasi; ${opening ? `u aynan “${opening}” bo‘lsin.` : "u tabiiy, diqqatni tortuvchi gap bo‘lsin."} 2) bo‘sh satrdan keyin Interest — muammo yoki holatni 1 qisqa paragrafda oching; 3) bo‘sh satrdan keyin Desire — amaliy foyda va ehtiyotkor tavsiyani 2 qisqa paragrafda bering. Action qismi avtomatik qo‘shiladi, uni yozmang. 650–1 200 belgi bo‘lsin. Muhokama chaqirig‘i, admin kontaktlari, manba, URL, Markdown yoki HTML yozmang.`
+    : "Rasm ostiga qo‘yiladigan 220–420 belgilik AIDA posti yozing: birinchi satr 90 belgidan oshmaydigan Attention sarlavhasi, bo‘sh satrdan keyin Interest va Desire mazmuni 2 qisqa paragrafda. Action qismi avtomatik qo‘shiladi, uni yozmang. Muhokama chaqirig‘i, admin kontaktlari, manba, URL, Markdown yoki HTML yozmang.";
   const channelContext = specialtyOnly ? "O‘zbek tilidagi amaliy tibbiy kanal. Sodda, mehribon va ehtiyotkor tushuntirishlar." : config.channelContext?.trim() || "O‘zbek tilidagi amaliy va ishonchli mavzuli kanal.";
   const role = specialtyOnly ? "Siz kanal egasi nomidan tabiiy va puxta yozadigan o‘zbek Telegram kopirayterisiz." : "Siz kanal egasi nomidan tabiiy va puxta yozadigan o‘zbek Telegram kopirayterisiz. Matn avtomatik yaratilgani bilinmasin.";
   const response = await fetch("https://api.openai.com/v1/responses", {
@@ -201,7 +214,7 @@ async function askOpenAi(config: BotConfig, topic: string, kind: Exclude<Content
       max_output_tokens: 1200,
       tools: [{ type: "web_search", search_context_size: "medium" }],
       tool_choice: "required",
-      instructions: `# Vazifa\n${role}\n\n# Faktlar\n- Avval web qidiruvdagi dolzarb, ishonchli ma’lumotni tekshiring. Tasdiqlanmagan fakt, statistika yoki vaqtga bog‘liq da’voni yozmang.\n- Agar yangi ma’lumot aniq bo‘lmasa, tekshiriladigan umumiy faktni tanlang.\n- ${domainRule}\n\n# Kanal ohangi\n- Kanal konteksti va auditoriyasiga mos yozing. O‘quvchini bevosita, samimiy va hurmat bilan gapga torting.\n- “muhim rol o‘ynaydi”, “inqilobiy o‘zgarish”, “bugungi kunda” kabi sun’iy, darslik uslubidagi iboralarni ishlatmang.\n- Bir aniq holat, muammo yoki kutilmagan savol bilan boshlang; keyin foydani sodda qilib oching. Bo‘rttirma va’dalar bermang.\n- Avvalgi kontentdagi sarlavha, kirish va asosiy fikrni takrorlamang.\n- Matnda manba, URL, admin kontakti, muhokama chaqirig‘i, HTML yoki Markdown yozmang.\n\n# Mavzuga sodiqlik\n- Sarlavha yoki birinchi satrda mavzu nomi aynan “${topic}” bo‘lsin. Butun matn faqat shu mavzuning amaliy jihatini yoritishi shart.\n\n# Qat’iy qoida\nKo‘rsatilgan format va soha chegarasiga so‘zsiz amal qiling.`,
+      instructions: `# Vazifa\n${role}\n\n# Faktlar\n- Avval web qidiruvdagi dolzarb, ishonchli ma’lumotni tekshiring. Tasdiqlanmagan fakt, statistika yoki vaqtga bog‘liq da’voni yozmang.\n- Mamlakat, so‘nggi yillar, foiz, kasallik soni yoki nomlangan test/uskuna haqidagi da’voni yozmang; bunday ma’lumot manbasiz noto‘g‘ri talqin qilinishi mumkin.\n- Agar yangi ma’lumot aniq bo‘lmasa, tekshiriladigan umumiy faktni tanlang.\n- ${domainRule}\n\n# Kopirayting arxitekturasi\n- Har matn AIDA bo‘lsin: Attention — alohida, qisqa sarlavha; Interest — muammoni tanish holat bilan ochish; Desire — aniq foyda yoki xavfsiz amaliy yo‘l; Action — kod tomonidan qo‘shiladi.\n- Attention sarlavhasi faqat bitta gap va alohida satrda bo‘lishi shart.\n- Kanal konteksti va auditoriyasiga mos yozing. O‘quvchini bevosita, samimiy va hurmat bilan gapga torting.\n- “muhim rol o‘ynaydi”, “inqilobiy o‘zgarish”, “bugungi kunda” kabi sun’iy, darslik uslubidagi iboralarni ishlatmang.\n- Bir aniq holat, muammo yoki kutilmagan savol bilan boshlang; keyin foydani sodda qilib oching. Bo‘rttirma va’dalar bermang.\n- Avvalgi kontentdagi sarlavha, kirish va asosiy fikrni takrorlamang.\n- Matnda manba, URL, admin kontakti, muhokama chaqirig‘i, HTML yoki Markdown yozmang.\n\n# Mavzuga sodiqlik\n- Sarlavha yoki birinchi satrda mavzu nomi aynan “${topic}” bo‘lsin. Butun matn faqat shu mavzuning amaliy jihatini yoritishi shart.\n\n# Qat’iy qoida\nKo‘rsatilgan format va soha chegarasiga so‘zsiz amal qiling.`,
       input: `Mavzu: ${topic}\nSoha turi: ${medicalTopic ? "tibbiyot" : "tibbiyot emas"}\nKanal konteksti: ${channelContext}\nKontent turi: ${kind}\n${format}\n${retry ? "Oldingi matn mavzuga yetarli bog‘lanmadi. Bu safar faqat shu mavzu doirasida yozing." : ""}\n\nQuyidagi shu mavzudagi avvalgi kontent allaqachon yuborilgan. Ulardan mutlaqo boshqa burchak tanlang:\n${previousFor(topic, kind, history)}`,
     }),
   });
@@ -249,7 +262,7 @@ async function sendContent(bot: Bot, config: BotConfig, kind: ContentKind, topic
   if (kind === "post") {
     try { await bot.api.sendPhoto(config.channelId!, await generateImage(config, topic, generated), { caption: telegramHtml(post), parse_mode: "HTML" }); }
     catch (error) { console.error("scheduled_image_failed", error); await bot.api.sendMessage(config.channelId!, telegramHtml(post), { parse_mode: "HTML", link_preview_options: { is_disabled: true } }); }
-  } else await bot.api.sendMessage(config.channelId!, post, { link_preview_options: { is_disabled: true } });
+  } else await bot.api.sendMessage(config.channelId!, telegramHtml(post), { parse_mode: "HTML", link_preview_options: { is_disabled: true } });
   return { content: post, basedOnPollId };
 }
 
