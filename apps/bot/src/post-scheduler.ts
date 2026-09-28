@@ -94,15 +94,26 @@ function cleanGeneratedContent(value: string): string {
 }
 
 function contactCta(config: BotConfig): string {
-  const parts = [config.contentCta?.trim(), config.ctaAdminUsername?.trim() ? `👤 Admin: ${config.ctaAdminUsername.trim()}` : undefined, config.websiteUrl?.trim() ? `🌐 ${config.websiteUrl.trim()}` : undefined, config.phoneNumber?.trim() ? `📞 ${config.phoneNumber.trim()}` : undefined, config.additionalPhoneNumber?.trim() ? `📞 Qo‘shimcha: ${config.additionalPhoneNumber.trim()}` : undefined, config.instagramHandle?.trim() ? `📸 Instagram: ${config.instagramHandle.trim()}` : undefined].filter((value): value is string => Boolean(value));
+  const parts = [config.contentCta?.trim().slice(0, 180), "Biz bilan bog‘lanish uchun quyidagi kontaktlarga murojaat qiling.", config.ctaAdminUsername?.trim() ? `👤 Admin: ${config.ctaAdminUsername.trim()}` : undefined, config.websiteUrl?.trim() ? `🌐 ${config.websiteUrl.trim()}` : undefined, config.phoneNumber?.trim() ? `📞 ${config.phoneNumber.trim()}` : undefined, config.additionalPhoneNumber?.trim() ? `📞 Qo‘shimcha: ${config.additionalPhoneNumber.trim()}` : undefined, config.instagramHandle?.trim() ? `📸 Instagram: ${config.instagramHandle.trim()}` : undefined].filter((value): value is string => Boolean(value));
   return parts.join("\n");
+}
+
+const engagementCta = "Siz bu haqda nima deb o‘ylaysiz? Fikringizni kommentariyada yozing.";
+
+function cutAtSentence(value: string, limit: number): string {
+  if (value.length <= limit) return value.trim();
+  const clipped = value.slice(0, limit + 1);
+  const lastSentence = Math.max(clipped.lastIndexOf("."), clipped.lastIndexOf("!"), clipped.lastIndexOf("?"));
+  return (lastSentence > Math.floor(limit * 0.55) ? clipped.slice(0, lastSentence + 1) : clipped.slice(0, limit).replace(/\s+\S*$/, "").trim() + ".").trim();
 }
 
 function finalPost(body: string, config: BotConfig): string {
   const contacts = contactCta(config);
-  const maximumBodyLength = Math.max(300, 950 - contacts.length - (contacts ? 2 : 0));
-  const trimmedBody = body.trim().slice(0, maximumBodyLength).trim();
-  return contacts ? `${trimmedBody}\n\n${contacts}` : trimmedBody;
+  const hasEngagement = /fikringizni|izoh(?:larda|da)|kommentariyada/i.test(body);
+  const reserved = contacts.length + (contacts ? 2 : 0) + (hasEngagement ? 0 : engagementCta.length + 2);
+  const trimmedBody = cutAtSentence(body.trim(), Math.max(300, 950 - reserved));
+  const parts = [trimmedBody, hasEngagement ? undefined : engagementCta, contacts].filter((value): value is string => Boolean(value));
+  return parts.join("\n\n");
 }
 
 function telegramHtml(post: string): string {
@@ -119,7 +130,7 @@ function previousFor(topic: string, kind: ContentKind, history: PostHistory): st
 }
 
 async function askOpenAi(config: BotConfig, topic: string, kind: Exclude<ContentKind, "poll">, history: PostHistory, opening?: string): Promise<string> {
-  const format = kind === "info" ? "350 belgidan oshmaydigan qisqa foydali ma’lumot yozing: sarlavha va 2-3 qisqa satr. CTA, manba, havola yozmang." : `700 belgidan oshmaydigan Telegram posti yozing. ${opening ? `Birinchi satr aynan shunday boshlansin: “${opening}”` : "Birinchi satr — qiziqarli, odamlarga tanish savol yoki muammo."} Keyin ko‘pi bilan 2 qisqa paragrafda aniq foyda; sog‘liq mavzusida shifokor qarori muhimligi haqidagi bitta mas’uliyatli jumla; yakunda mavzuga oid bitta savol, keyin alohida satrda fikr yozish va keyingi postlarni o‘tkazib yubormaslikka undovchi qisqa CTA bo‘lsin. Har safar boshqa uslub va boshqa savol tanlang. Sarlavhada Markdown yoki HTML ishlatmang. Admin kontaktlari, manba va URL yozmang.`;
+  const format = kind === "info" ? "300 belgidan oshmaydigan qisqa foydali ma’lumot yozing: sarlavha va 2 qisqa satr. CTA, manba, havola yozmang." : `520 belgidan oshmaydigan Telegram posti yozing. ${opening ? `Birinchi satr aynan shunday boshlansin: “${opening}”` : "Birinchi satr — qiziqarli, odamlarga tanish savol yoki muammo."} Keyin ko‘pi bilan 2 qisqa paragrafda aniq foyda yozing; har bir gap 160 belgidan oshmasin; sog‘liq mavzusida shifokor qarori muhimligi haqidagi bitta mas’uliyatli jumla yozing. Oxirgi satr aynan shunday bo‘lsin: “Siz bu haqda nima deb o‘ylaysiz? Fikringizni kommentariyada yozing.” Admin kontaktlari, manba, URL, Markdown yoki HTML yozmang.`;
   const response = await fetch("https://api.openai.com/v1/responses", {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${config.openAiApiKey}` },
