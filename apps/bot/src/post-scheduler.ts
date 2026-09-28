@@ -53,6 +53,10 @@ function pickTopic(config: BotConfig, history: PostHistory, kind: ContentKind): 
   return config.contentTopics[sentForKind % config.contentTopics.length]!;
 }
 
+function isMedicalTopic(topic: string): boolean {
+  return /\b(tibb(?:iyot|iy)?|medits(?:ina|inskiy)?|sog['‘’]?liq|salomatlik|bemor|shifokor|kasallik|davolash|dori|tashxis|diagnoz|klinika|kardiolog|pulmonolog|pediatr|stomatolog|ginekolog|jarroh|hamshira|psixiatr|terapiya)\b/i.test(topic);
+}
+
 function latestPostTopic(history: PostHistory): string | undefined {
   return [...(history.posts ?? [])].reverse().find((post) => post.kind === "post")?.topic;
 }
@@ -94,7 +98,7 @@ function cleanGeneratedContent(value: string): string {
 }
 
 function contactCta(config: BotConfig): string {
-  const parts = [config.contentCta?.trim().slice(0, 180), "Biz bilan bog‘lanish uchun quyidagi kontaktlarga murojaat qiling.", config.ctaAdminUsername?.trim() ? `👤 Admin: ${config.ctaAdminUsername.trim()}` : undefined, config.websiteUrl?.trim() ? `🌐 ${config.websiteUrl.trim()}` : undefined, config.phoneNumber?.trim() ? `📞 ${config.phoneNumber.trim()}` : undefined, config.additionalPhoneNumber?.trim() ? `📞 Qo‘shimcha: ${config.additionalPhoneNumber.trim()}` : undefined, config.instagramHandle?.trim() ? `📸 Instagram: ${config.instagramHandle.trim()}` : undefined].filter((value): value is string => Boolean(value));
+  const parts = ["Biz bilan bog‘lanish uchun quyidagi kontaktlarga murojaat qiling.", config.ctaAdminUsername?.trim() ? `👤 Admin: ${config.ctaAdminUsername.trim()}` : undefined, config.websiteUrl?.trim() ? `🌐 ${config.websiteUrl.trim()}` : undefined, config.phoneNumber?.trim() ? `📞 ${config.phoneNumber.trim()}` : undefined, config.additionalPhoneNumber?.trim() ? `📞 Qo‘shimcha: ${config.additionalPhoneNumber.trim()}` : undefined, config.instagramHandle?.trim() ? `📸 Instagram: ${config.instagramHandle.trim()}` : undefined].filter((value): value is string => Boolean(value));
   return parts.join("\n");
 }
 
@@ -109,10 +113,9 @@ function cutAtSentence(value: string, limit: number): string {
 
 function finalPost(body: string, config: BotConfig): string {
   const contacts = contactCta(config);
-  const hasEngagement = /fikringizni|izoh(?:larda|da)|kommentariyada/i.test(body);
-  const reserved = contacts.length + (contacts ? 2 : 0) + (hasEngagement ? 0 : engagementCta.length + 2);
+  const reserved = contacts.length + (contacts ? 2 : 0) + engagementCta.length + 2;
   const trimmedBody = cutAtSentence(body.trim(), Math.max(300, 950 - reserved));
-  const parts = [trimmedBody, hasEngagement ? undefined : engagementCta, contacts].filter((value): value is string => Boolean(value));
+  const parts = [trimmedBody, engagementCta, contacts].filter((value): value is string => Boolean(value));
   return parts.join("\n\n");
 }
 
@@ -130,7 +133,11 @@ function previousFor(topic: string, kind: ContentKind, history: PostHistory): st
 }
 
 async function askOpenAi(config: BotConfig, topic: string, kind: Exclude<ContentKind, "poll">, history: PostHistory, opening?: string): Promise<string> {
-  const format = kind === "info" ? "300 belgidan oshmaydigan qisqa foydali ma’lumot yozing: sarlavha va 2 qisqa satr. CTA, manba, havola yozmang." : `520 belgidan oshmaydigan Telegram posti yozing. ${opening ? `Birinchi satr aynan shunday boshlansin: “${opening}”` : "Birinchi satr — qiziqarli, odamlarga tanish savol yoki muammo."} Keyin ko‘pi bilan 2 qisqa paragrafda aniq foyda yozing; har bir gap 160 belgidan oshmasin; sog‘liq mavzusida shifokor qarori muhimligi haqidagi bitta mas’uliyatli jumla yozing. Oxirgi satr aynan shunday bo‘lsin: “Siz bu haqda nima deb o‘ylaysiz? Fikringizni kommentariyada yozing.” Admin kontaktlari, manba, URL, Markdown yoki HTML yozmang.`;
+  const medicalTopic = isMedicalTopic(topic);
+  const domainRule = medicalTopic
+    ? "Bu TIBBIY mavzu. Faqat tibbiyotga oid foydali, ehtiyotkor ma’lumot yozing. Tashxis, individual davolash yoki dori dozasi bermang; yakuniy qaror shifokorniki ekanini qisqa va tabiiy ayting."
+    : "Bu TIBBIY EMAS mavzu. Sog‘liq, bemor, shifokor, klinika, tashxis, davolash, dori yoki tibbiyotga oid misol va foydani mutlaqo kiritmang. AI yoki AI agent mavzusini texnologiya, ish jarayoni, avtomatlashtirish, mahsuldorlik, xavfsizlik yoki kundalik amaliyot nuqtai nazaridan yoritib bering.";
+  const format = kind === "info" ? "300 belgidan oshmaydigan qisqa foydali ma’lumot yozing: sarlavha va 2 qisqa satr. CTA, manba, havola yozmang." : `520 belgidan oshmaydigan Telegram posti yozing. ${opening ? `Birinchi satr aynan shunday boshlansin: “${opening}”` : "Birinchi satr — qiziqarli, odamlarga tanish savol yoki muammo."} Keyin ko‘pi bilan 2 qisqa paragrafda aniq foyda yozing; har bir gap 160 belgidan oshmasin. Muhokama chaqirig‘i, admin kontaktlari, manba, URL, Markdown yoki HTML yozmang.`;
   const response = await fetch("https://api.openai.com/v1/responses", {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${config.openAiApiKey}` },
@@ -140,8 +147,8 @@ async function askOpenAi(config: BotConfig, topic: string, kind: Exclude<Content
       max_output_tokens: 750,
       tools: [{ type: "web_search", search_context_size: "medium" }],
       tool_choice: "required",
-      instructions: "# Role\nSiz o‘zbek tilida yozadigan professional Telegram kontent muharririsiz.\n\n# Fact safety\n- Faqat mustahkam, umumiy tan olingan ma’lumotni yozing. Ishonchingiz bo‘lmagan fakt, statistika, tashxis, individual davolash va dori dozasini yozmang.\n- Sog‘liq mavzusida shifokor nazorati chegarasini aniq ayting.\n\n# Writing rules\n- Mavzu qaysi sohada berilsa, faqat shu sohaga oid, amaliy va sodda kontent yozing.\n- Umumiy darslik uslubidagi “muhim rol o‘ynaydi”, “inqilobiy o‘zgarish” kabi bo‘sh iboralarni ishlatmang.\n- O‘quvchini gapga tortadigan savol, aniq foyda va yakuniy muhokama savoli bo‘lsin.\n- Avvalgi kontentdagi burchak, sarlavha va fikrlarni takrorlamang.\n- Matnda manba, URL, admin kontakti, HTML yoki Markdown yozmang.\n\n# Final instruction\nKo‘rsatilgan chiqish formatiga so‘zsiz amal qiling.",
-      input: `Mavzu: ${topic}\nKontent turi: ${kind}\n${format}\n\nQuyidagi shu mavzudagi avvalgi postlar allaqachon yuborilgan. Ulardan mutlaqo boshqa kichik mavzu/burchak tanlang:\n${previousFor(topic, kind, history)}`,
+      instructions: `# Role\nSiz o‘zbek tilida yozadigan professional Telegram kontent muharririsiz.\n\n# Fact safety\n- Avval web qidiruvdagi dolzarb, ishonchli ma’lumotni tekshiring. Tasdiqlanmagan fakt, statistika yoki vaqtga bog‘liq da’voni yozmang.\n- Agar yangi ma’lumot aniq bo‘lmasa, abadiy (evergreen) va tekshiriladigan umumiy faktni tanlang.\n- ${domainRule}\n\n# Writing rules\n- Mavzu qaysi sohada berilsa, faqat shu sohaga oid, amaliy va sodda kontent yozing; boshqa soha misolini qo‘shmang.\n- Umumiy darslik uslubidagi “muhim rol o‘ynaydi”, “inqilobiy o‘zgarish” kabi bo‘sh iboralarni ishlatmang.\n- Kirish odamni o‘qishni davom ettirishga undasin; fikr bitta ravshan misol yoki foyda orqali tushuntirilsin.\n- Avvalgi kontentdagi burchak, sarlavha va fikrlarni takrorlamang.\n- Matnda manba, URL, admin kontakti, muhokama chaqirig‘i, HTML yoki Markdown yozmang.\n\n# Final instruction\nKo‘rsatilgan chiqish formatiga so‘zsiz amal qiling. Soha turidan tashqariga chiqmang.`,
+      input: `Mavzu: ${topic}\nSoha turi: ${medicalTopic ? "tibbiyot" : "tibbiyot emas"}\nKontent turi: ${kind}\n${format}\n\nQuyidagi shu mavzudagi avvalgi postlar allaqachon yuborilgan. Ulardan mutlaqo boshqa kichik mavzu/burchak tanlang:\n${previousFor(topic, kind, history)}`,
     }),
   });
   if (!response.ok) throw new Error(`OpenAI ${response.status}: ${await response.text()}`);
