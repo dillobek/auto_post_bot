@@ -54,7 +54,7 @@ function pickTopic(config: BotConfig, history: PostHistory, kind: ContentKind): 
 }
 
 function isMedicalTopic(topic: string): boolean {
-  return /\b(tibb(?:iyot|iy)?|medits(?:ina|inskiy)?|sog['‘’]?liq|salomatlik|bemor|shifokor|kasallik|davolash|dori|tashxis|diagnoz|klinika|kardiolog|pulmonolog|pediatr|stomatolog|ginekolog|jarroh|hamshira|psixiatr|terapiya)\b/i.test(topic);
+  return /\b(tibb(?:iyot|iy)?|medits(?:ina|inskiy)?|sog['‘’]?liq|salomatlik|bemor|shifokor|kasallik|davolash|dori|tashxis|diagnoz|klinika|kardiolog|pulmonolog|pediatr|stomatolog|ginekolog|jarroh|hamshira|psixiatr|terapiya|nevrolog|onkolog|endokrinolog|dermatolog|oftalmolog|urolog|gastroenterolog|nefrolog|immunolog|reumatolog|travmatolog|ortoped|akusher|reanimatolog|farmats)\b/i.test(topic);
 }
 
 function latestPostTopic(history: PostHistory): string | undefined {
