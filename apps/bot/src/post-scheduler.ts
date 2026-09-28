@@ -45,13 +45,22 @@ function outputText(response: OpenAiResponse): string {
 }
 
 function contactCta(config: BotConfig): string {
-  const parts = [config.contentCta?.trim(), config.ctaAdminUsername?.trim() ? `Admin: ${config.ctaAdminUsername.trim()}` : undefined, config.websiteUrl?.trim() ? `Website: ${config.websiteUrl.trim()}` : undefined, config.phoneNumber?.trim() ? `Tel: ${config.phoneNumber.trim()}` : undefined, config.additionalPhoneNumber?.trim() ? `Qo‘shimcha tel: ${config.additionalPhoneNumber.trim()}` : undefined, config.instagramHandle?.trim() ? `Instagram: ${config.instagramHandle.trim()}` : undefined].filter((value): value is string => Boolean(value));
+  const parts = [config.contentCta?.trim(), config.ctaAdminUsername?.trim() ? `👤 Admin: ${config.ctaAdminUsername.trim()}` : undefined, config.websiteUrl?.trim() ? `🌐 ${config.websiteUrl.trim()}` : undefined, config.phoneNumber?.trim() ? `📞 ${config.phoneNumber.trim()}` : undefined, config.additionalPhoneNumber?.trim() ? `📞 Qo‘shimcha: ${config.additionalPhoneNumber.trim()}` : undefined, config.instagramHandle?.trim() ? `📸 Instagram: ${config.instagramHandle.trim()}` : undefined].filter((value): value is string => Boolean(value));
   return parts.join("\n");
 }
 
 function finalPost(body: string, config: BotConfig): string {
-  const parts = [body.trim(), contactCta(config)];
-  return parts.filter(Boolean).join("\n\n").slice(0, 950);
+  const contacts = contactCta(config);
+  const maximumBodyLength = Math.max(300, 950 - contacts.length - (contacts ? 2 : 0));
+  const trimmedBody = body.trim().slice(0, maximumBodyLength).trim();
+  return contacts ? `${trimmedBody}\n\n${contacts}` : trimmedBody;
+}
+
+function telegramHtml(post: string): string {
+  const escape = (value: string) => value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const lines = post.split(/\n+/).map((line) => line.trim()).filter(Boolean);
+  const [headline, ...rest] = lines;
+  return headline ? `<b>${escape(headline)}</b>${rest.length ? `\n\n${escape(rest.join("\n\n"))}` : ""}` : "";
 }
 
 function previousFor(topic: string, kind: ContentKind, history: PostHistory): string {
@@ -61,7 +70,7 @@ function previousFor(topic: string, kind: ContentKind, history: PostHistory): st
 }
 
 async function askOpenAi(config: BotConfig, topic: string, kind: ContentKind, history: PostHistory): Promise<string> {
-  const format = kind === "poll" ? "Faqat quyidagi JSONni qaytaring: {\"question\":\"...\",\"options\":[\"...\",\"...\",\"...\"]}. Savol 300 belgidan, har variant 100 belgidan oshmasin; 2-6 variant bo‘lsin." : kind === "info" ? "350 belgidan oshmaydigan qisqa foydali ma’lumot yozing: sarlavha va 2-3 qisqa satr. CTA, manba, havola yozmang." : "Sarlavha va ko‘pi bilan 2 qisqa paragrafdan iborat, 600 belgidan oshmaydigan foydali post yozing. CTA, manba, havola yozmang.";
+  const format = kind === "poll" ? "Faqat quyidagi JSONni qaytaring: {\"question\":\"...\",\"options\":[\"...\",\"...\",\"...\"]}. Savol 300 belgidan, har variant 100 belgidan oshmasin; 2-6 variant bo‘lsin." : kind === "info" ? "350 belgidan oshmaydigan qisqa foydali ma’lumot yozing: sarlavha va 2-3 qisqa satr. CTA, manba, havola yozmang." : "700 belgidan oshmaydigan Telegram posti yozing. Birinchi satr — qiziqarli, odamlarga tanish savol yoki muammo; keyin ko‘pi bilan 2 qisqa paragrafda aniq foyda; sog‘liq mavzusida shifokor qarori muhimligi haqidagi bitta mas’uliyatli jumla; yakunda mavzuga oid bitta savol va fikr yozishga chaqiriq. Har safar boshqa uslub va boshqa savol tanlang. Sarlavhada Markdown yoki HTML ishlatmang. Admin kontaktlari, manba va URL yozmang.";
   const response = await fetch("https://api.openai.com/v1/responses", {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${config.openAiApiKey}` },
@@ -75,7 +84,7 @@ async function askOpenAi(config: BotConfig, topic: string, kind: ContentKind, hi
       tools: [{ type: "web_search", search_context_size: "medium" }],
       tool_choice: "required",
       include: ["web_search_call.action.sources"],
-      instructions: `Siz o‘zbek tilida yozadigan professional kontent muharririsiz. Mavzu qaysi sohada berilsa, faqat shu sohaga oid, aniq va sodda kontent yozing. Avval ishonchli rasmiy manbalardan web qidiruv qiling (ustuvor domenlar: ${officialDomains.join(", ")}). Faqat sog‘liq mavzusida tashxis, individual davolash yoki dori dozasi bermang. Avvalgi kontentdagi burchak, sarlavha va fikrlarni takrorlamang. Matnda manba, URL yoki iqtibos yozmang.`,
+      instructions: `# Role\nSiz o‘zbek tilida yozadigan professional Telegram kontent muharririsiz.\n\n# Response rules\n- Mavzu qaysi sohada berilsa, faqat shu sohaga oid, amaliy va sodda kontent yozing.\n- Umumiy darslik uslubidagi “muhim rol o‘ynaydi”, “inqilobiy o‘zgarish” kabi bo‘sh iboralarni ishlatmang.\n- Avval ishonchli rasmiy manbalardan web qidiruv qiling (ustuvor domenlar: ${officialDomains.join(", ")}).\n- Sog‘liq mavzusida tashxis, individual davolash yoki dori dozasi bermang; shifokor nazorati chegarasini aniq ayting.\n- O‘quvchini gapga tortadigan savol, aniq foyda va yakuniy muhokama savoli bo‘lsin.\n- Avvalgi kontentdagi burchak, sarlavha va fikrlarni takrorlamang.\n- Matnda manba, URL, admin kontakti yoki HTML/Markdown yozmang.\n\n# Final instruction\nKo‘rsatilgan chiqish formatiga so‘zsiz amal qiling.`,
       input: `Mavzu: ${topic}\nKontent turi: ${kind}\n${format}\n\nQuyidagi shu mavzudagi avvalgi postlar allaqachon yuborilgan. Ulardan mutlaqo boshqa kichik mavzu/burchak tanlang:\n${previousFor(topic, kind, history)}`,
     }),
   });
@@ -117,8 +126,8 @@ async function sendContent(bot: Bot, config: BotConfig, kind: ContentKind, topic
   }
   const post = finalPost(generated, config);
   if (kind === "post") {
-    try { await bot.api.sendPhoto(config.channelId!, await generateImage(config, topic, post), { caption: post }); }
-    catch (error) { console.error("scheduled_image_failed", error); await bot.api.sendMessage(config.channelId!, post, { link_preview_options: { is_disabled: true } }); }
+    try { await bot.api.sendPhoto(config.channelId!, await generateImage(config, topic, post), { caption: telegramHtml(post), parse_mode: "HTML" }); }
+    catch (error) { console.error("scheduled_image_failed", error); await bot.api.sendMessage(config.channelId!, telegramHtml(post), { parse_mode: "HTML", link_preview_options: { is_disabled: true } }); }
   } else await bot.api.sendMessage(config.channelId!, post, { link_preview_options: { is_disabled: true } });
   return post;
 }
