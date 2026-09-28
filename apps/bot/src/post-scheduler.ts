@@ -61,6 +61,11 @@ function latestPostTopic(history: PostHistory): string | undefined {
   return [...(history.posts ?? [])].reverse().find((post) => post.kind === "post")?.topic;
 }
 
+function isActiveTopic(config: BotConfig, topic: string): boolean {
+  const normalized = topic.trim().toLocaleLowerCase();
+  return config.contentTopics.some((item) => item.trim().toLocaleLowerCase() === normalized);
+}
+
 function pollOpening(poll: PollRecord): string | undefined {
   const largest = Math.max(...poll.votes);
   if (!largest) return undefined;
@@ -70,10 +75,13 @@ function pollOpening(poll: PollRecord): string | undefined {
 }
 
 function contentContext(config: BotConfig, history: PostHistory, kind: ContentKind): { topic: string; opening?: string; basedOnPollId?: string } {
-  if (kind === "poll") return { topic: latestPostTopic(history) ?? pickTopic(config, history, kind) };
+  if (kind === "poll") {
+    const previousTopic = latestPostTopic(history);
+    return { topic: previousTopic && isActiveTopic(config, previousTopic) ? previousTopic : pickTopic(config, history, kind) };
+  }
   if (kind === "post") {
     const usedPolls = new Set((history.posts ?? []).flatMap((post) => post.basedOnPollId ? [post.basedOnPollId] : []));
-    const poll = [...(history.polls ?? [])].reverse().find((item) => !usedPolls.has(item.id) && pollOpening(item));
+    const poll = [...(history.polls ?? [])].reverse().find((item) => !usedPolls.has(item.id) && isActiveTopic(config, item.topic) && pollOpening(item));
     if (poll) return { topic: poll.topic, opening: pollOpening(poll), basedOnPollId: poll.id };
   }
   return { topic: pickTopic(config, history, kind) };
@@ -111,10 +119,14 @@ function cutAtSentence(value: string, limit: number): string {
   return (lastSentence > Math.floor(limit * 0.55) ? clipped.slice(0, lastSentence + 1) : clipped.slice(0, limit).replace(/\s+\S*$/, "").trim() + ".").trim();
 }
 
+function withoutEngagementLines(value: string): string {
+  return value.split("\n").filter((line) => !/(fikringizni|kommentariyada|izoh(?:larda|da)|nima deb o['‘’]ylaysiz)/i.test(line)).join("\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+
 function finalPost(body: string, config: BotConfig): string {
   const contacts = contactCta(config);
   const reserved = contacts.length + (contacts ? 2 : 0) + engagementCta.length + 2;
-  const trimmedBody = cutAtSentence(body.trim(), Math.max(300, 950 - reserved));
+  const trimmedBody = cutAtSentence(withoutEngagementLines(body), Math.max(300, 950 - reserved));
   const parts = [trimmedBody, engagementCta, contacts].filter((value): value is string => Boolean(value));
   return parts.join("\n\n");
 }
