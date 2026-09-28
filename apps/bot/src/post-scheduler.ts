@@ -154,6 +154,17 @@ function finalPost(body: string, config: BotConfig, maxLength: number): string {
   return parts.join("\n\n");
 }
 
+function fallbackContent(topic: string, kind: Exclude<ContentKind, "poll">, opening?: string): string {
+  const medicalTopic = isMedicalTopic(topic);
+  const firstLine = opening ?? (kind === "post" ? `${topic}: e’tiborli belgilarni o‘tkazib yubormang.` : `${topic} haqida muhim jihatlarni birga ko‘rib chiqamiz.`);
+  if (medicalTopic) {
+    if (kind === "post") return `${firstLine}\n\nAlomatlar takrorlansa, kuchaysa yoki kundalik hayotga xalaqit bersa, ularni e’tiborsiz qoldirmaslik kerak. Holatni kuzatish va mutaxassis bilan maslahatlashish to‘g‘ri yo‘l tanlashga yordam beradi.`;
+    return `${firstLine}\n\n${topic}da birgina alomatga qarab xulosa qilish to‘g‘ri bo‘lmaydi. Belgilar qachon boshlanganini, nima kuchaytirishini va boshqa o‘zgarishlarni qayd etish shifokor bilan suhbatni ancha mazmunli qiladi.\n\nAyniqsa, holat takrorlansa, kuchaysa yoki uyqu, ishtaha, nafas olish va odatiy faollikka ta’sir qilsa, kechiktirmasdan mutaxassisga murojaat qiling. Erta e’tibor ko‘pincha vaziyatni to‘g‘ri baholashga yordam beradi.\n\nIjtimoiy tarmoqlardagi umumiy tavsiyalar ko‘rik o‘rnini bosa olmaydi. Har bir odamning holati alohida baholanadi.`;
+  }
+  if (kind === "post") return `${firstLine}\n\nBu yo‘nalishda kichik, izchil qadamlar ko‘pincha katta natija beradi. Avval amaliy ehtiyojni aniqlang, keyin uni sinab ko‘rib, natijaga qarab keyingi qadamni belgilang.`;
+  return `${firstLine}\n\n${topic}ni tushunishda umumiy gaplardan ko‘ra amaliy savollar ko‘proq foyda beradi: muammo nimada, kimga ta’sir qiladi va birinchi qadam qanday bo‘lishi mumkin? Shu savollar mavzuni aniqroq ko‘rishga yordam beradi.\n\nKichik tajriba qiling, natijani kuzating va keyingi qarorni shunga tayang. Shunda mavzu nazariyada qolmay, kundalik hayotda foyda beradigan yechimga aylanadi.`;
+}
+
 function telegramHtml(post: string): string {
   const escape = (value: string) => value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const lines = post.split(/\n+/).map((line) => line.trim()).filter(Boolean);
@@ -202,7 +213,8 @@ async function askOpenAi(config: BotConfig, topic: string, kind: Exclude<Content
   const reason = text.length < minLength ? "yetarli emas" : !isGroundedInTopic(text, topic) ? "mavzuga bog‘lanmadi" : hasUnexpectedAi(text, topic) ? "mavzudan tashqari texnologiya atamasini ishlatdi" : undefined;
   if (reason) {
     if (!retry) return askOpenAi(config, topic, kind, history, opening, true);
-    throw new Error(`AI matni ${reason}.`);
+    console.warn("content_generation_fallback", { topic, kind, reason });
+    return fallbackContent(topic, kind, opening);
   }
   return text;
 }
@@ -227,7 +239,12 @@ async function sendContent(bot: Bot, config: BotConfig, kind: ContentKind, topic
     if (!sent.poll) throw new Error("Telegram opros ID sini qaytarmadi.");
     return { content: `${question}\nHa | Yo‘q | Qiziq emas`, pollId: sent.poll.id };
   }
-  const generated = await askOpenAi(config, topic, kind, history, opening);
+  let generated: string;
+  try { generated = await askOpenAi(config, topic, kind, history, opening); }
+  catch (error) {
+    console.error("content_generation_failed_using_fallback", error);
+    generated = fallbackContent(topic, kind, opening);
+  }
   const post = finalPost(generated, config, kind === "post" ? 950 : 1_700);
   if (kind === "post") {
     try { await bot.api.sendPhoto(config.channelId!, await generateImage(config, topic, generated), { caption: telegramHtml(post), parse_mode: "HTML" }); }
