@@ -8,6 +8,9 @@ export type TelegramSettings = {
   groupId?: string;
   openAiApiKey?: string;
   openAiModel?: string;
+  contentTopics?: string[];
+  contentCta?: string;
+  sourceUrls?: string[];
   adminUsername?: string;
   adminPasswordHash?: string;
   updatedAt?: string;
@@ -59,6 +62,9 @@ export function publicTelegramSettings(settings: TelegramSettings) {
     groupId: settings.groupId ?? "",
     hasOpenAiApiKey: Boolean(settings.openAiApiKey),
     openAiModel: settings.openAiModel ?? "gpt-4.1-mini",
+    contentTopics: settings.contentTopics ?? [],
+    contentCta: settings.contentCta ?? "",
+    sourceUrls: settings.sourceUrls ?? [],
     adminUsername: settings.adminUsername ?? process.env.ADMIN_USERNAME ?? "",
     hasCustomAdminPassword: Boolean(settings.adminPasswordHash),
     updatedAt: settings.updatedAt ?? null,
