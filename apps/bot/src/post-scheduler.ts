@@ -96,8 +96,8 @@ function contentContext(config: BotConfig, history: PostHistory, kind: ContentKi
     return { topic: previousTopic && isActiveTopic(config, previousTopic) ? previousTopic : pickTopic(config, history, kind) };
   }
   const usedPolls = new Set((history.posts ?? []).filter((post) => post.kind === "info").flatMap((post) => post.basedOnPollId ? [post.basedOnPollId] : []));
-  const poll = [...(history.polls ?? [])].reverse().find((item) => !usedPolls.has(item.id) && isActiveTopic(config, item.topic) && pollOpening(item));
-  return poll ? { topic: poll.topic, opening: pollOpening(poll), basedOnPollId: poll.id } : undefined;
+  const poll = [...(history.polls ?? [])].reverse().find((item) => !usedPolls.has(item.id) && isActiveTopic(config, item.topic));
+  return poll ? { topic: poll.topic, opening: pollOpening(poll) ?? "Keling, bu mavzuni batafsil ko‘rib chiqamiz.", basedOnPollId: poll.id } : undefined;
 }
 
 function outputText(response: OpenAiResponse): string {
