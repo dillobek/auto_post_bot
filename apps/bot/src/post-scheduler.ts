@@ -58,6 +58,14 @@ function isMedicalTopic(topic: string): boolean {
   return /\b(tibb(?:iyot|iy)?|medits(?:ina|inskiy)?|sog['‘’]?liq|salomatlik|bemor|shifokor|kasallik|davolash|dori|tashxis|diagnoz|klinika|kardiolog|pulmonolog|pediatr|stomatolog|ginekolog|jarroh|hamshira|psixiatr|terapiya|nevrolog|onkolog|endokrinolog|dermatolog|oftalmolog|urolog|gastroenterolog|nefrolog|immunolog|reumatolog|travmatolog|ortoped|akusher|reanimatolog|farmats)\b/i.test(topic);
 }
 
+function isAiTopic(topic: string): boolean {
+  return /sun['‘’]?iy\s+intellekt|\bai\b|agent(?:lar)?\b/i.test(topic);
+}
+
+function hasUnexpectedAi(text: string, topic: string): boolean {
+  return isMedicalTopic(topic) && !isAiTopic(topic) && /sun['‘’]?iy\s+intellekt|\bai\b|agent(?:lar)?\b/i.test(text);
+}
+
 function latestPostTopic(history: PostHistory): string | undefined {
   return [...(history.posts ?? [])].reverse().find((post) => post.kind === "post")?.topic;
 }
@@ -161,8 +169,11 @@ function previousFor(topic: string, kind: ContentKind, history: PostHistory): st
 
 async function askOpenAi(config: BotConfig, topic: string, kind: Exclude<ContentKind, "poll">, history: PostHistory, opening?: string, retry = false): Promise<string> {
   const medicalTopic = isMedicalTopic(topic);
-  const domainRule = medicalTopic
-    ? "Bu TIBBIY mavzu. Faqat tibbiyotga oid foydali, ehtiyotkor ma’lumot yozing. Tashxis, individual davolash yoki dori dozasi bermang; yakuniy qaror shifokorniki ekanini qisqa va tabiiy ayting."
+  const aiTopic = isAiTopic(topic);
+  const domainRule = medicalTopic && !aiTopic
+    ? "Bu sun’iy intellekt mavzusi EMAS, balki tibbiy mutaxassislik mavzusi. Sun’iy intellekt, AI, algoritm, agent yoki raqamli texnologiyani umuman tilga olmang. Faqat shu mutaxassislikning bemor uchun amaliy, ehtiyotkor foydali jihatini yozing. Tashxis, individual davolash yoki dori dozasi bermang; yakuniy qaror shifokorniki ekanini qisqa va tabiiy ayting."
+    : medicalTopic
+      ? "Bu tibbiyot va sun’iy intellekt kesishmasidagi mavzu. AI faqat mavzu nomida aniq berilgan tibbiy vazifa doirasida yozilsin. Tashxis, individual davolash yoki dori dozasi bermang; yakuniy qaror shifokorniki ekanini qisqa va tabiiy ayting."
     : "Bu TIBBIY EMAS mavzu. Sog‘liq, bemor, shifokor, klinika, tashxis, davolash, dori yoki tibbiyotga oid misol va foydani mutlaqo kiritmang. AI yoki AI agent mavzusini texnologiya, ish jarayoni, avtomatlashtirish, mahsuldorlik, xavfsizlik yoki kundalik amaliyot nuqtai nazaridan yoritib bering.";
   const format = kind === "info"
     ? `Batafsil Telegram ma’lumotini yozing: ${opening ? `birinchi satr aynan shunday boshlansin: “${opening}”` : "birinchi satr diqqatni tortadigan, tabiiy kirish bo‘lsin."} Keyin 3–4 qisqa paragrafda muammo, sabab va amaliy yo‘lni tushuntiring. 650–1 200 belgi bo‘lsin. Muhokama chaqirig‘i, admin kontaktlari, manba, URL, Markdown yoki HTML yozmang.`
@@ -178,7 +189,7 @@ async function askOpenAi(config: BotConfig, topic: string, kind: Exclude<Content
       tools: [{ type: "web_search", search_context_size: "medium" }],
       tool_choice: "required",
       instructions: `# Vazifa\nSiz kanal egasi nomidan tabiiy va puxta yozadigan o‘zbek Telegram kopirayterisiz. Matn AI yaratgani bilinmasin.\n\n# Faktlar\n- Avval web qidiruvdagi dolzarb, ishonchli ma’lumotni tekshiring. Tasdiqlanmagan fakt, statistika yoki vaqtga bog‘liq da’voni yozmang.\n- Agar yangi ma’lumot aniq bo‘lmasa, tekshiriladigan umumiy faktni tanlang.\n- ${domainRule}\n\n# Kanal ohangi\n- Kanal konteksti va auditoriyasiga mos yozing. O‘quvchini bevosita, samimiy va hurmat bilan gapga torting.\n- “muhim rol o‘ynaydi”, “inqilobiy o‘zgarish”, “bugungi kunda” kabi sun’iy, darslik uslubidagi iboralarni ishlatmang.\n- Bir aniq holat, muammo yoki kutilmagan savol bilan boshlang; keyin foydani sodda qilib oching. Bo‘rttirma va’dalar bermang.\n- Avvalgi kontentdagi sarlavha, kirish va asosiy fikrni takrorlamang.\n- Matnda manba, URL, admin kontakti, muhokama chaqirig‘i, HTML yoki Markdown yozmang.\n\n# Mavzuga sodiqlik\n- Sarlavha yoki birinchi satrda mavzu nomi aynan “${topic}” bo‘lsin. Butun matn faqat shu mavzuning amaliy jihatini yoritishi shart.\n\n# Qat’iy qoida\nKo‘rsatilgan format va soha chegarasiga so‘zsiz amal qiling.`,
-      input: `Mavzu: ${topic}\nSoha turi: ${medicalTopic ? "tibbiyot" : "tibbiyot emas"}\nKanal konteksti: ${channelContext}\nKontent turi: ${kind}\n${format}\n${retry ? "Oldingi matn mavzuga yetarli bog‘lanmadi. Bu safar mavzu nomi birinchi satrda bo‘lishi va faqat shu mavzu yoritilishi shart." : ""}\n\nQuyidagi shu mavzudagi avvalgi kontent allaqachon yuborilgan. Ulardan mutlaqo boshqa burchak tanlang:\n${previousFor(topic, kind, history)}`,
+      input: `Mavzu: ${topic}\nSoha turi: ${medicalTopic ? "tibbiyot" : "tibbiyot emas"}\nKanal konteksti: ${channelContext}\nKontent turi: ${kind}\n${format}\n${retry ? `Oldingi matn mavzuga yetarli bog‘lanmadi${medicalTopic && !aiTopic ? " yoki unda taqiqlangan AI mavzusi bor edi" : ""}. Bu safar faqat mavzu doirasida yozing.` : ""}\n\nQuyidagi shu mavzudagi avvalgi kontent allaqachon yuborilgan. Ulardan mutlaqo boshqa burchak tanlang:\n${previousFor(topic, kind, history)}`,
     }),
   });
   if (!response.ok) throw new Error(`OpenAI ${response.status}: ${await response.text()}`);
@@ -186,7 +197,7 @@ async function askOpenAi(config: BotConfig, topic: string, kind: Exclude<Content
   const text = cleanGeneratedContent(outputText(payload));
   if (!text) throw new Error("OpenAI bo‘sh javob qaytardi.");
   const minLength = kind === "info" ? 450 : 180;
-  if (text.length < minLength || !isGroundedInTopic(text, topic)) {
+  if (text.length < minLength || !isGroundedInTopic(text, topic) || hasUnexpectedAi(text, topic)) {
     if (!retry) return askOpenAi(config, topic, kind, history, opening, true);
     throw new Error("AI matni mavzuga bog‘lanmadi yoki yetarli emas.");
   }
