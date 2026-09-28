@@ -79,10 +79,13 @@ async function askOpenAi(config: BotConfig, topic: string, kind: ContentKind, hi
       model: config.openAiModel,
       store: false,
       max_output_tokens: kind === "poll" ? 300 : 750,
-      tools: [{ type: "web_search", search_context_size: "medium", filters: { allowed_domains: officialDomains } }],
+      // gpt-4.1-mini supports Responses web search but rejects the optional
+      // domain-filter parameter. The instruction below still requires official
+      // sources, while keeping the configured economical model operational.
+      tools: [{ type: "web_search", search_context_size: "medium" }],
       tool_choice: "required",
       include: ["web_search_call.action.sources"],
-      instructions: "Siz o‘zbek tilida yozadigan tibbiy kontent muharririsiz. Avval rasmiy tibbiy manbalardan web qidiruv qiling. Faqat ommaviy ma’rifiy, ehtiyotkor kontent yozing; tashxis, individual davolash yoki dori dozasi bermang. Jiddiy yoki shoshilinch simptomlar bo‘lsa shifokorga yoki tez yordamga murojaat qilishni eslating. Avvalgi kontentdagi burchak, sarlavha va fikrlarni takrorlamang.",
+      instructions: `Siz o‘zbek tilida yozadigan tibbiy kontent muharririsiz. Avval rasmiy tibbiy manbalardan web qidiruv qiling (ustuvor domenlar: ${officialDomains.join(", ")}). Faqat ommaviy ma’rifiy, ehtiyotkor kontent yozing; tashxis, individual davolash yoki dori dozasi bermang. Jiddiy yoki shoshilinch simptomlar bo‘lsa shifokorga yoki tez yordamga murojaat qilishni eslating. Avvalgi kontentdagi burchak, sarlavha va fikrlarni takrorlamang.`,
       input: `Mavzu: ${topic}\nKontent turi: ${kind}\n${format}\n\nQuyidagi shu mavzudagi avvalgi postlar allaqachon yuborilgan. Ulardan mutlaqo boshqa kichik mavzu/burchak tanlang:\n${previousFor(topic, kind, history)}`,
     }),
   });
