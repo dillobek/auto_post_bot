@@ -33,8 +33,8 @@ async function checkConnection(ctx: Context): Promise<string> {
     return `${status} ${chatId}: ${member.status}`;
   }));
   const connections = checks.length ? checks.join("\n") : "Kanal va guruh IDlari sozlanmagan.";
-  const schedule = config.postSchedule.filter((item) => item.enabled).map((item) => item.time).join(", ");
-  return `${connections}\n\nAvtopost: ${schedule || "vaqt sozlanmagan"} (Toshkent vaqti)\nMavzular: ${config.contentTopics.length}\nOpenAI: ${config.openAiApiKey ? config.openAiModel : "API key kutilmoqda"}`;
+  const schedules = (["post", "poll", "info"] as const).map((kind) => `${kind === "post" ? "Post" : kind === "poll" ? "Opros" : "Ma’lumot"}: ${config.postSchedules[kind].filter((item) => item.enabled).map((item) => item.time).join(", ") || "yo‘q"}`).join("\n");
+  return `${connections}\n\n${schedules}\n(Toshkent vaqti)\nMavzular: ${config.contentTopics.length}\nOpenAI: ${config.openAiApiKey ? config.openAiModel : "API key kutilmoqda"}`;
 }
 
 function createBot() {

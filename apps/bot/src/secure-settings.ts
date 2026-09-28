@@ -4,6 +4,7 @@ import path from "node:path";
 
 type EncryptedPayload = { iv: string; tag: string; ciphertext: string };
 export type StoredPostSchedule = { time: string; enabled: boolean };
+export type StoredPostSchedules = Partial<Record<"post" | "poll" | "info", StoredPostSchedule[]>>;
 export type StoredTelegramSettings = {
   botToken?: string;
   channelId?: string;
@@ -12,8 +13,14 @@ export type StoredTelegramSettings = {
   openAiModel?: string;
   contentTopics?: string[];
   contentCta?: string;
+  ctaAdminUsername?: string;
+  websiteUrl?: string;
+  phoneNumber?: string;
+  additionalPhoneNumber?: string;
+  instagramHandle?: string;
   sourceUrls?: string[];
   postSchedule?: StoredPostSchedule[];
+  postSchedules?: StoredPostSchedules;
 };
 
 function key(): Buffer | undefined {

@@ -10,8 +10,15 @@ export type TelegramSettings = {
   openAiModel?: string;
   contentTopics?: string[];
   contentCta?: string;
+  ctaAdminUsername?: string;
+  websiteUrl?: string;
+  phoneNumber?: string;
+  additionalPhoneNumber?: string;
+  instagramHandle?: string;
   sourceUrls?: string[];
+  /** Legacy one-stream schedule, retained to migrate existing saved settings. */
   postSchedule?: Array<{ time: string; enabled: boolean }>;
+  postSchedules?: Partial<Record<"post" | "poll" | "info", Array<{ time: string; enabled: boolean }>>>;
   adminUsername?: string;
   adminPasswordHash?: string;
   updatedAt?: string;
@@ -57,6 +64,11 @@ export async function writeTelegramSettings(settings: TelegramSettings): Promise
 }
 
 export function publicTelegramSettings(settings: TelegramSettings) {
+  const postSchedules = {
+    post: settings.postSchedules?.post ?? settings.postSchedule ?? [],
+    poll: settings.postSchedules?.poll ?? [],
+    info: settings.postSchedules?.info ?? [],
+  };
   return {
     hasBotToken: Boolean(settings.botToken),
     channelId: settings.channelId ?? "",
@@ -65,8 +77,13 @@ export function publicTelegramSettings(settings: TelegramSettings) {
     openAiModel: settings.openAiModel ?? "gpt-4.1-mini",
     contentTopics: settings.contentTopics ?? [],
     contentCta: settings.contentCta ?? "",
+    ctaAdminUsername: settings.ctaAdminUsername ?? "",
+    websiteUrl: settings.websiteUrl ?? "",
+    phoneNumber: settings.phoneNumber ?? "",
+    additionalPhoneNumber: settings.additionalPhoneNumber ?? "",
+    instagramHandle: settings.instagramHandle ?? "",
     sourceUrls: settings.sourceUrls ?? [],
-    postSchedule: settings.postSchedule ?? [],
+    postSchedules,
     adminUsername: settings.adminUsername ?? process.env.ADMIN_USERNAME ?? "",
     hasCustomAdminPassword: Boolean(settings.adminPasswordHash),
     updatedAt: settings.updatedAt ?? null,
