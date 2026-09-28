@@ -4,14 +4,14 @@ import path from "node:path";
 import { BotConfig } from "./config.js";
 
 type ContentKind = "post" | "poll" | "info";
-type SentContent = { key: string; topic: string; kind: ContentKind; content: string; createdAt: string };
-type PostHistory = { sent: Record<string, true>; posts?: SentContent[] };
+type SentContent = { key: string; topic: string; kind: ContentKind; content: string; createdAt: string; pollId?: string; basedOnPollId?: string };
+type PollRecord = { id: string; topic: string; createdAt: string; votes: [number, number, number] };
+type PostHistory = { sent: Record<string, true>; posts?: SentContent[]; polls?: PollRecord[] };
 type OpenAiResponse = { output_text?: string; output?: Array<{ type?: string; content?: Array<{ type?: string; text?: string }> }> };
 type ImageResponse = { data?: Array<{ b64_json?: string }> };
-type Poll = { question: string; options: string[] };
+type ContentResult = { content: string; pollId?: string; basedOnPollId?: string };
 
 const historyPath = process.env.SHIFOKOR_POST_HISTORY_FILE ?? path.resolve(process.cwd(), "../../data/post-history.json");
-const officialDomains = ["www.who.int", "www.cdc.gov", "medlineplus.gov", "www.nhs.uk", "pubmed.ncbi.nlm.nih.gov", "www.fda.gov"];
 
 function tashkentNow() {
   const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Tashkent", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts();
@@ -20,18 +20,32 @@ function tashkentNow() {
 }
 
 async function readHistory(): Promise<PostHistory> {
-  try { const value = JSON.parse(await readFile(historyPath, "utf8")) as PostHistory; return { sent: value.sent ?? {}, posts: value.posts ?? [] }; }
-  catch { return { sent: {}, posts: [] }; }
+  try { const value = JSON.parse(await readFile(historyPath, "utf8")) as PostHistory; return { sent: value.sent ?? {}, posts: value.posts ?? [], polls: value.polls ?? [] }; }
+  catch { return { sent: {}, posts: [], polls: [] }; }
+}
+
+async function persistHistory(history: PostHistory): Promise<void> {
+  await mkdir(path.dirname(historyPath), { recursive: true });
+  await writeFile(historyPath, JSON.stringify(history), { encoding: "utf8", mode: 0o600 });
 }
 
 async function rememberSent(history: PostHistory, entry: SentContent): Promise<void> {
   history.sent[entry.key] = true;
   history.posts = [...(history.posts ?? []), entry];
+  if (entry.pollId) history.polls = [...(history.polls ?? []), { id: entry.pollId, topic: entry.topic, createdAt: entry.createdAt, votes: [0, 0, 0] }];
   const cutoff = new Date(Date.now() - 31 * 24 * 60 * 60 * 1000).toISOString();
   for (const existing of Object.keys(history.sent)) if (existing.slice(0, 10) < cutoff.slice(0, 10)) delete history.sent[existing];
   history.posts = history.posts.filter((post) => post.createdAt >= cutoff).slice(-300);
-  await mkdir(path.dirname(historyPath), { recursive: true });
-  await writeFile(historyPath, JSON.stringify(history), { encoding: "utf8", mode: 0o600 });
+  history.polls = (history.polls ?? []).filter((poll) => poll.createdAt >= cutoff).slice(-100);
+  await persistHistory(history);
+}
+
+async function rememberPollVotes(pollId: string, counts: number[]): Promise<void> {
+  const history = await readHistory();
+  const poll = history.polls?.find((item) => item.id === pollId);
+  if (!poll) return;
+  poll.votes = [counts[0] ?? 0, counts[1] ?? 0, counts[2] ?? 0];
+  await persistHistory(history);
 }
 
 function pickTopic(config: BotConfig, history: PostHistory, kind: ContentKind): string {
@@ -39,9 +53,44 @@ function pickTopic(config: BotConfig, history: PostHistory, kind: ContentKind): 
   return config.contentTopics[sentForKind % config.contentTopics.length]!;
 }
 
+function latestPostTopic(history: PostHistory): string | undefined {
+  return [...(history.posts ?? [])].reverse().find((post) => post.kind === "post")?.topic;
+}
+
+function pollOpening(poll: PollRecord): string | undefined {
+  const largest = Math.max(...poll.votes);
+  if (!largest) return undefined;
+  if (poll.votes[0] === largest) return "Talablarga binoan ulashyapman.";
+  if (poll.votes[1] === largest) return "Sizlarni bunday ma’lumotdan quruq qoldirgim kelmaydi.";
+  return "Bu ma’lumot siz o‘ylaganingizdan ko‘ra qiziqarliroq.";
+}
+
+function contentContext(config: BotConfig, history: PostHistory, kind: ContentKind): { topic: string; opening?: string; basedOnPollId?: string } {
+  if (kind === "poll") return { topic: latestPostTopic(history) ?? pickTopic(config, history, kind) };
+  if (kind === "post") {
+    const usedPolls = new Set((history.posts ?? []).flatMap((post) => post.basedOnPollId ? [post.basedOnPollId] : []));
+    const poll = [...(history.polls ?? [])].reverse().find((item) => !usedPolls.has(item.id) && pollOpening(item));
+    if (poll) return { topic: poll.topic, opening: pollOpening(poll), basedOnPollId: poll.id };
+  }
+  return { topic: pickTopic(config, history, kind) };
+}
+
 function outputText(response: OpenAiResponse): string {
   if (response.output_text) return response.output_text.trim();
   return response.output?.flatMap((item) => item.content ?? []).filter((item) => item.type === "output_text" && item.text).map((item) => item.text).join("\n").trim() ?? "";
+}
+
+function cleanGeneratedContent(value: string): string {
+  return value
+    .replace(/\s*\[[^\]]+\]\(https?:\/\/[^)]+\)/gi, "")
+    .replace(/\s*\(https?:\/\/[^)]+\)/gi, "")
+    .replace(/https?:\/\/\S+/gi, "")
+    .replace(/[*_`]/g, "")
+    .split("\n").filter((line) => !/^\s*(manba|sources?|reference|•\s*https?:)/i.test(line)).join("\n")
+    .replace(/\(\s*\)/g, "")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
 function contactCta(config: BotConfig): string {
@@ -69,28 +118,22 @@ function previousFor(topic: string, kind: ContentKind, history: PostHistory): st
   return items.length ? items.map((post, index) => `${index + 1}. ${post.content.replace(/\s+/g, " ").slice(0, 380)}`).join("\n") : "Yo‘q";
 }
 
-async function askOpenAi(config: BotConfig, topic: string, kind: ContentKind, history: PostHistory): Promise<string> {
-  const format = kind === "poll" ? "Faqat quyidagi JSONni qaytaring: {\"question\":\"...\",\"options\":[\"...\",\"...\",\"...\"]}. Savol 300 belgidan, har variant 100 belgidan oshmasin; 2-6 variant bo‘lsin." : kind === "info" ? "350 belgidan oshmaydigan qisqa foydali ma’lumot yozing: sarlavha va 2-3 qisqa satr. CTA, manba, havola yozmang." : "700 belgidan oshmaydigan Telegram posti yozing. Birinchi satr — qiziqarli, odamlarga tanish savol yoki muammo; keyin ko‘pi bilan 2 qisqa paragrafda aniq foyda; sog‘liq mavzusida shifokor qarori muhimligi haqidagi bitta mas’uliyatli jumla; yakunda mavzuga oid bitta savol, keyin alohida satrda fikr yozish va keyingi postlarni o‘tkazib yubormaslikka undovchi qisqa CTA bo‘lsin. Har safar boshqa uslub va boshqa savol tanlang. Sarlavhada Markdown yoki HTML ishlatmang. Admin kontaktlari, manba va URL yozmang.";
+async function askOpenAi(config: BotConfig, topic: string, kind: Exclude<ContentKind, "poll">, history: PostHistory, opening?: string): Promise<string> {
+  const format = kind === "info" ? "350 belgidan oshmaydigan qisqa foydali ma’lumot yozing: sarlavha va 2-3 qisqa satr. CTA, manba, havola yozmang." : `700 belgidan oshmaydigan Telegram posti yozing. ${opening ? `Birinchi satr aynan shunday boshlansin: “${opening}”` : "Birinchi satr — qiziqarli, odamlarga tanish savol yoki muammo."} Keyin ko‘pi bilan 2 qisqa paragrafda aniq foyda; sog‘liq mavzusida shifokor qarori muhimligi haqidagi bitta mas’uliyatli jumla; yakunda mavzuga oid bitta savol, keyin alohida satrda fikr yozish va keyingi postlarni o‘tkazib yubormaslikka undovchi qisqa CTA bo‘lsin. Har safar boshqa uslub va boshqa savol tanlang. Sarlavhada Markdown yoki HTML ishlatmang. Admin kontaktlari, manba va URL yozmang.`;
   const response = await fetch("https://api.openai.com/v1/responses", {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${config.openAiApiKey}` },
     body: JSON.stringify({
       model: config.openAiModel,
       store: false,
-      max_output_tokens: kind === "poll" ? 300 : 750,
-      // gpt-4.1-mini supports Responses web search but rejects the optional
-      // domain-filter parameter. The instruction below still requires official
-      // sources, while keeping the configured economical model operational.
-      tools: [{ type: "web_search", search_context_size: "medium" }],
-      tool_choice: "required",
-      include: ["web_search_call.action.sources"],
-      instructions: `# Role\nSiz o‘zbek tilida yozadigan professional Telegram kontent muharririsiz.\n\n# Response rules\n- Mavzu qaysi sohada berilsa, faqat shu sohaga oid, amaliy va sodda kontent yozing.\n- Umumiy darslik uslubidagi “muhim rol o‘ynaydi”, “inqilobiy o‘zgarish” kabi bo‘sh iboralarni ishlatmang.\n- Avval ishonchli rasmiy manbalardan web qidiruv qiling (ustuvor domenlar: ${officialDomains.join(", ")}).\n- Sog‘liq mavzusida tashxis, individual davolash yoki dori dozasi bermang; shifokor nazorati chegarasini aniq ayting.\n- O‘quvchini gapga tortadigan savol, aniq foyda va yakuniy muhokama savoli bo‘lsin.\n- Avvalgi kontentdagi burchak, sarlavha va fikrlarni takrorlamang.\n- Matnda manba, URL, admin kontakti yoki HTML/Markdown yozmang.\n\n# Final instruction\nKo‘rsatilgan chiqish formatiga so‘zsiz amal qiling.`,
+      max_output_tokens: 750,
+      instructions: "# Role\nSiz o‘zbek tilida yozadigan professional Telegram kontent muharririsiz.\n\n# Fact safety\n- Faqat mustahkam, umumiy tan olingan ma’lumotni yozing. Ishonchingiz bo‘lmagan fakt, statistika, tashxis, individual davolash va dori dozasini yozmang.\n- Sog‘liq mavzusida shifokor nazorati chegarasini aniq ayting.\n\n# Writing rules\n- Mavzu qaysi sohada berilsa, faqat shu sohaga oid, amaliy va sodda kontent yozing.\n- Umumiy darslik uslubidagi “muhim rol o‘ynaydi”, “inqilobiy o‘zgarish” kabi bo‘sh iboralarni ishlatmang.\n- O‘quvchini gapga tortadigan savol, aniq foyda va yakuniy muhokama savoli bo‘lsin.\n- Avvalgi kontentdagi burchak, sarlavha va fikrlarni takrorlamang.\n- Matnda manba, URL, admin kontakti, HTML yoki Markdown yozmang.\n\n# Final instruction\nKo‘rsatilgan chiqish formatiga so‘zsiz amal qiling.",
       input: `Mavzu: ${topic}\nKontent turi: ${kind}\n${format}\n\nQuyidagi shu mavzudagi avvalgi postlar allaqachon yuborilgan. Ulardan mutlaqo boshqa kichik mavzu/burchak tanlang:\n${previousFor(topic, kind, history)}`,
     }),
   });
   if (!response.ok) throw new Error(`OpenAI ${response.status}: ${await response.text()}`);
   const payload = await response.json() as OpenAiResponse;
-  const text = outputText(payload);
+  const text = cleanGeneratedContent(outputText(payload));
   if (!text) throw new Error("OpenAI bo‘sh javob qaytardi.");
   return text;
 }
@@ -108,32 +151,28 @@ async function generateImage(config: BotConfig, topic: string, post: string): Pr
   return new InputFile(Buffer.from(image, "base64"), "autopost.jpg");
 }
 
-function parsePoll(text: string): Poll {
-  const raw = text.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
-  const value = JSON.parse(raw) as Partial<Poll>;
-  const question = value.question?.trim();
-  const options = value.options?.map((option) => option.trim()).filter(Boolean) ?? [];
-  if (!question || question.length > 300 || options.length < 2 || options.length > 6 || options.some((option) => option.length > 100)) throw new Error("OpenAI yaroqsiz so‘rovnoma qaytardi.");
-  return { question, options };
-}
-
-async function sendContent(bot: Bot, config: BotConfig, kind: ContentKind, topic: string, history: PostHistory): Promise<string> {
-  const generated = await askOpenAi(config, topic, kind, history);
+async function sendContent(bot: Bot, config: BotConfig, kind: ContentKind, topic: string, history: PostHistory, opening?: string, basedOnPollId?: string): Promise<ContentResult> {
   if (kind === "poll") {
-    const poll = parsePoll(generated);
-    await bot.api.sendPoll(config.channelId!, poll.question, poll.options.map((text) => ({ text })), { is_anonymous: true });
-    return `${poll.question}\n${poll.options.join(" | ")}`;
+    const question = `“${topic}” mavzusini davom ettirib, amaliy ma’lumot ulashaymi?`;
+    const sent = await bot.api.sendPoll(config.channelId!, question, [{ text: "Ha" }, { text: "Yo‘q" }, { text: "Qiziq emas" }], { is_anonymous: true });
+    if (!sent.poll) throw new Error("Telegram opros ID sini qaytarmadi.");
+    return { content: `${question}\nHa | Yo‘q | Qiziq emas`, pollId: sent.poll.id };
   }
+  const generated = await askOpenAi(config, topic, kind, history, opening);
   const post = finalPost(generated, config);
   if (kind === "post") {
     try { await bot.api.sendPhoto(config.channelId!, await generateImage(config, topic, post), { caption: telegramHtml(post), parse_mode: "HTML" }); }
     catch (error) { console.error("scheduled_image_failed", error); await bot.api.sendMessage(config.channelId!, telegramHtml(post), { parse_mode: "HTML", link_preview_options: { is_disabled: true } }); }
   } else await bot.api.sendMessage(config.channelId!, post, { link_preview_options: { is_disabled: true } });
-  return post;
+  return { content: post, basedOnPollId };
 }
 
 export function startPostScheduler(bot: Bot, getConfig: () => BotConfig, isPaused: () => boolean): void {
   let inFlight = false;
+  bot.on("poll", async (ctx) => {
+    try { await rememberPollVotes(ctx.poll.id, ctx.poll.options.map((option) => option.voter_count)); }
+    catch (error) { console.error("poll_results_store_failed", error); }
+  });
   const tick = async () => {
     if (inFlight || isPaused()) return;
     const config = getConfig();
@@ -147,10 +186,10 @@ export function startPostScheduler(bot: Bot, getConfig: () => BotConfig, isPause
     inFlight = true;
     const key = `${now.date}-${next.kind}-${next.time}`;
     try {
-      const topic = pickTopic(config, history, next.kind);
-      const content = await sendContent(bot, config, next.kind, topic, history);
-      await rememberSent(history, { key, topic, kind: next.kind, content, createdAt: new Date().toISOString() });
-      console.info("scheduled_content_sent", { key, topic, kind: next.kind, channelId: config.channelId });
+      const context = contentContext(config, history, next.kind);
+      const result = await sendContent(bot, config, next.kind, context.topic, history, context.opening, context.basedOnPollId);
+      await rememberSent(history, { key, topic: context.topic, kind: next.kind, content: result.content, pollId: result.pollId, basedOnPollId: result.basedOnPollId, createdAt: new Date().toISOString() });
+      console.info("scheduled_content_sent", { key, topic: context.topic, kind: next.kind, channelId: config.channelId });
     } catch (error) { console.error("scheduled_content_failed", error); }
     finally { inFlight = false; }
   };
