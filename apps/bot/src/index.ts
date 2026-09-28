@@ -80,7 +80,9 @@ function startPollingWhenConfigured() {
   if (pollingStarted) return;
   pollingStarted = true;
   const bot = createBot();
-  startPostScheduler(bot, () => config, () => runtime.paused);
+  // Re-read encrypted admin settings immediately before each scheduling tick.
+  // This prevents a post from using topics that were replaced in the dashboard.
+  startPostScheduler(bot, loadConfig, () => runtime.paused);
   bot.start({ onStart: (info) => console.info(`@${info.username} polling boshlandi`) });
 }
 
