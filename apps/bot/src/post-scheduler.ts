@@ -62,6 +62,20 @@ function latestPostTopic(history: PostHistory): string | undefined {
   return [...(history.posts ?? [])].reverse().find((post) => post.kind === "post")?.topic;
 }
 
+function topicSignals(topic: string): string[] {
+  const normalized = topic.toLocaleLowerCase();
+  const specialty = normalized.includes("pediatr") ? ["pediatr"]
+    : normalized.includes("pulmanolog") || normalized.includes("pulmonolog") ? ["pulman", "pulmon"]
+      : normalized.includes("allergolog") ? ["allerg"] : [];
+  const words = normalized.replace(/[^\p{L}\p{N}\s]/gu, " ").split(/\s+/).filter((word) => word.length >= 4);
+  return [...new Set([...specialty, ...words])];
+}
+
+function isGroundedInTopic(text: string, topic: string): boolean {
+  const normalized = text.toLocaleLowerCase();
+  return topicSignals(topic).some((signal) => normalized.includes(signal));
+}
+
 function isActiveTopic(config: BotConfig, topic: string): boolean {
   const normalized = topic.trim().toLocaleLowerCase();
   return config.contentTopics.some((item) => item.trim().toLocaleLowerCase() === normalized);
@@ -119,13 +133,15 @@ function cutAtSentence(value: string, limit: number): string {
 }
 
 function withoutEngagementLines(value: string): string {
-  return value.split("\n").filter((line) => !/(fikringizni|kommentariyada|izoh(?:larda|da)|nima deb o['‘’]ylaysiz)/i.test(line)).join("\n").replace(/\n{3,}/g, "\n\n").trim();
+  return value.split("\n").filter((line) => !/^\s*(?:siz bu haqda nima deb o['‘’]ylaysiz|fikringizni|fikrlaringizni|izoh(?:larda|da)|sizning fikringizni)/i.test(line)).join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
 function finalPost(body: string, config: BotConfig, maxLength: number): string {
   const contacts = contactCta(config);
   const reserved = contacts.length + (contacts ? 2 : 0) + engagementCta.length + 2;
-  const trimmedBody = cutAtSentence(withoutEngagementLines(body), Math.max(300, maxLength - reserved));
+  const contentBody = withoutEngagementLines(body);
+  if (contentBody.length < 80) throw new Error("Yuborish uchun yetarli asosiy matn yaratilmagan.");
+  const trimmedBody = cutAtSentence(contentBody, Math.max(300, maxLength - reserved));
   const parts = [trimmedBody, engagementCta, contacts].filter((value): value is string => Boolean(value));
   return parts.join("\n\n");
 }
@@ -143,14 +159,14 @@ function previousFor(topic: string, kind: ContentKind, history: PostHistory): st
   return items.length ? items.map((post, index) => `${index + 1}. ${post.content.replace(/\s+/g, " ").slice(0, 380)}`).join("\n") : "Yo‘q";
 }
 
-async function askOpenAi(config: BotConfig, topic: string, kind: Exclude<ContentKind, "poll">, history: PostHistory, opening?: string): Promise<string> {
+async function askOpenAi(config: BotConfig, topic: string, kind: Exclude<ContentKind, "poll">, history: PostHistory, opening?: string, retry = false): Promise<string> {
   const medicalTopic = isMedicalTopic(topic);
   const domainRule = medicalTopic
     ? "Bu TIBBIY mavzu. Faqat tibbiyotga oid foydali, ehtiyotkor ma’lumot yozing. Tashxis, individual davolash yoki dori dozasi bermang; yakuniy qaror shifokorniki ekanini qisqa va tabiiy ayting."
     : "Bu TIBBIY EMAS mavzu. Sog‘liq, bemor, shifokor, klinika, tashxis, davolash, dori yoki tibbiyotga oid misol va foydani mutlaqo kiritmang. AI yoki AI agent mavzusini texnologiya, ish jarayoni, avtomatlashtirish, mahsuldorlik, xavfsizlik yoki kundalik amaliyot nuqtai nazaridan yoritib bering.";
   const format = kind === "info"
-    ? `Batafsil Telegram ma’lumotini yozing: ${opening ? `birinchi satr aynan shunday boshlansin: “${opening}”` : "birinchi satr diqqatni tortadigan, tabiiy kirish bo‘lsin."} Keyin 3–4 qisqa paragrafda muammo, sabab va amaliy yo‘lni tushuntiring. 1 200 belgidan oshmang. Muhokama chaqirig‘i, admin kontaktlari, manba, URL, Markdown yoki HTML yozmang.`
-    : "Rasm ostiga qo‘yiladigan 420 belgidan oshmaydigan qisqa Telegram posti yozing. Birinchi satr odamni to‘xtatib o‘qitadigan tabiiy savol yoki holat bo‘lsin. Keyin bir aniq foyda yoki oddiy misolni 2 qisqa paragrafda ayting. Muhokama chaqirig‘i, admin kontaktlari, manba, URL, Markdown yoki HTML yozmang.";
+    ? `Batafsil Telegram ma’lumotini yozing: ${opening ? `birinchi satr aynan shunday boshlansin: “${opening}”` : "birinchi satr diqqatni tortadigan, tabiiy kirish bo‘lsin."} Keyin 3–4 qisqa paragrafda muammo, sabab va amaliy yo‘lni tushuntiring. 650–1 200 belgi bo‘lsin. Muhokama chaqirig‘i, admin kontaktlari, manba, URL, Markdown yoki HTML yozmang.`
+    : "Rasm ostiga qo‘yiladigan 220–420 belgilik qisqa Telegram posti yozing. Birinchi satr odamni to‘xtatib o‘qitadigan tabiiy savol yoki holat bo‘lsin. Keyin bir aniq foyda yoki oddiy misolni 2 qisqa paragrafda ayting. Muhokama chaqirig‘i, admin kontaktlari, manba, URL, Markdown yoki HTML yozmang.";
   const channelContext = config.channelContext?.trim() || "O‘zbek tilidagi amaliy va ishonchli mavzuli kanal.";
   const response = await fetch("https://api.openai.com/v1/responses", {
     method: "POST",
@@ -161,14 +177,19 @@ async function askOpenAi(config: BotConfig, topic: string, kind: Exclude<Content
       max_output_tokens: 1200,
       tools: [{ type: "web_search", search_context_size: "medium" }],
       tool_choice: "required",
-      instructions: `# Vazifa\nSiz kanal egasi nomidan tabiiy va puxta yozadigan o‘zbek Telegram kopirayterisiz. Matn AI yaratgani bilinmasin.\n\n# Faktlar\n- Avval web qidiruvdagi dolzarb, ishonchli ma’lumotni tekshiring. Tasdiqlanmagan fakt, statistika yoki vaqtga bog‘liq da’voni yozmang.\n- Agar yangi ma’lumot aniq bo‘lmasa, tekshiriladigan umumiy faktni tanlang.\n- ${domainRule}\n\n# Kanal ohangi\n- Kanal konteksti va auditoriyasiga mos yozing. O‘quvchini bevosita, samimiy va hurmat bilan gapga torting.\n- “muhim rol o‘ynaydi”, “inqilobiy o‘zgarish”, “bugungi kunda” kabi sun’iy, darslik uslubidagi iboralarni ishlatmang.\n- Bir aniq holat, muammo yoki kutilmagan savol bilan boshlang; keyin foydani sodda qilib oching. Bo‘rttirma va’dalar bermang.\n- Avvalgi kontentdagi sarlavha, kirish va asosiy fikrni takrorlamang.\n- Matnda manba, URL, admin kontakti, muhokama chaqirig‘i, HTML yoki Markdown yozmang.\n\n# Qat’iy qoida\nKo‘rsatilgan format va soha chegarasiga so‘zsiz amal qiling.`,
-      input: `Mavzu: ${topic}\nSoha turi: ${medicalTopic ? "tibbiyot" : "tibbiyot emas"}\nKanal konteksti: ${channelContext}\nKontent turi: ${kind}\n${format}\n\nQuyidagi shu mavzudagi avvalgi kontent allaqachon yuborilgan. Ulardan mutlaqo boshqa burchak tanlang:\n${previousFor(topic, kind, history)}`,
+      instructions: `# Vazifa\nSiz kanal egasi nomidan tabiiy va puxta yozadigan o‘zbek Telegram kopirayterisiz. Matn AI yaratgani bilinmasin.\n\n# Faktlar\n- Avval web qidiruvdagi dolzarb, ishonchli ma’lumotni tekshiring. Tasdiqlanmagan fakt, statistika yoki vaqtga bog‘liq da’voni yozmang.\n- Agar yangi ma’lumot aniq bo‘lmasa, tekshiriladigan umumiy faktni tanlang.\n- ${domainRule}\n\n# Kanal ohangi\n- Kanal konteksti va auditoriyasiga mos yozing. O‘quvchini bevosita, samimiy va hurmat bilan gapga torting.\n- “muhim rol o‘ynaydi”, “inqilobiy o‘zgarish”, “bugungi kunda” kabi sun’iy, darslik uslubidagi iboralarni ishlatmang.\n- Bir aniq holat, muammo yoki kutilmagan savol bilan boshlang; keyin foydani sodda qilib oching. Bo‘rttirma va’dalar bermang.\n- Avvalgi kontentdagi sarlavha, kirish va asosiy fikrni takrorlamang.\n- Matnda manba, URL, admin kontakti, muhokama chaqirig‘i, HTML yoki Markdown yozmang.\n\n# Mavzuga sodiqlik\n- Sarlavha yoki birinchi satrda mavzu nomi aynan “${topic}” bo‘lsin. Butun matn faqat shu mavzuning amaliy jihatini yoritishi shart.\n\n# Qat’iy qoida\nKo‘rsatilgan format va soha chegarasiga so‘zsiz amal qiling.`,
+      input: `Mavzu: ${topic}\nSoha turi: ${medicalTopic ? "tibbiyot" : "tibbiyot emas"}\nKanal konteksti: ${channelContext}\nKontent turi: ${kind}\n${format}\n${retry ? "Oldingi matn mavzuga yetarli bog‘lanmadi. Bu safar mavzu nomi birinchi satrda bo‘lishi va faqat shu mavzu yoritilishi shart." : ""}\n\nQuyidagi shu mavzudagi avvalgi kontent allaqachon yuborilgan. Ulardan mutlaqo boshqa burchak tanlang:\n${previousFor(topic, kind, history)}`,
     }),
   });
   if (!response.ok) throw new Error(`OpenAI ${response.status}: ${await response.text()}`);
   const payload = await response.json() as OpenAiResponse;
   const text = cleanGeneratedContent(outputText(payload));
   if (!text) throw new Error("OpenAI bo‘sh javob qaytardi.");
+  const minLength = kind === "info" ? 450 : 180;
+  if (text.length < minLength || !isGroundedInTopic(text, topic)) {
+    if (!retry) return askOpenAi(config, topic, kind, history, opening, true);
+    throw new Error("AI matni mavzuga bog‘lanmadi yoki yetarli emas.");
+  }
   return text;
 }
 
@@ -187,7 +208,7 @@ async function generateImage(config: BotConfig, topic: string, post: string): Pr
 
 async function sendContent(bot: Bot, config: BotConfig, kind: ContentKind, topic: string, history: PostHistory, opening?: string, basedOnPollId?: string): Promise<ContentResult> {
   if (kind === "poll") {
-    const question = `“${topic}” bo‘yicha batafsil, amaliy ma’lumot ulashaymi?`;
+    const question = `Yuqoridagi “${topic}” postining davomini — batafsil va amaliy ma’lumotini ulashaymi?`;
     const sent = await bot.api.sendPoll(config.channelId!, question, [{ text: "Ha" }, { text: "Yo‘q" }, { text: "Qiziq emas" }], { is_anonymous: true });
     if (!sent.poll) throw new Error("Telegram opros ID sini qaytarmadi.");
     return { content: `${question}\nHa | Yo‘q | Qiziq emas`, pollId: sent.poll.id };
