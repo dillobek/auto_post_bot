@@ -1,4 +1,4 @@
-import { Bot } from "grammy";
+import { Bot, InputFile } from "grammy";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { BotConfig } from "./config.js";
@@ -6,8 +6,8 @@ import { BotConfig } from "./config.js";
 type ContentKind = "post" | "poll" | "info";
 type SentContent = { key: string; topic: string; kind: ContentKind; content: string; createdAt: string };
 type PostHistory = { sent: Record<string, true>; posts?: SentContent[] };
-type OpenAiResponse = { output_text?: string; output?: Array<{ type?: string; action?: { sources?: Array<{ url?: string }> }; content?: Array<{ type?: string; text?: string; annotations?: Array<{ type?: string; url_citation?: { url?: string } }> }> }> };
-type GeneratedContent = { text: string; sourceUrls: string[] };
+type OpenAiResponse = { output_text?: string; output?: Array<{ type?: string; content?: Array<{ type?: string; text?: string }> }> };
+type ImageResponse = { data?: Array<{ b64_json?: string }> };
 type Poll = { question: string; options: string[] };
 
 const historyPath = process.env.SHIFOKOR_POST_HISTORY_FILE ?? path.resolve(process.cwd(), "../../data/post-history.json");
@@ -44,24 +44,14 @@ function outputText(response: OpenAiResponse): string {
   return response.output?.flatMap((item) => item.content ?? []).filter((item) => item.type === "output_text" && item.text).map((item) => item.text).join("\n").trim() ?? "";
 }
 
-function citedUrls(response: OpenAiResponse): string[] {
-  const urls = response.output?.flatMap((item) => [
-    ...(item.action?.sources?.map((source) => source.url) ?? []),
-    ...(item.content?.flatMap((content) => content.annotations?.map((annotation) => annotation.url_citation?.url) ?? []) ?? []),
-  ]) ?? [];
-  return [...new Set(urls.filter((url): url is string => Boolean(url && /^https:\/\//.test(url))))].slice(0, 2);
-}
-
 function contactCta(config: BotConfig): string {
   const parts = [config.contentCta?.trim(), config.ctaAdminUsername?.trim() ? `Admin: ${config.ctaAdminUsername.trim()}` : undefined, config.websiteUrl?.trim() ? `Website: ${config.websiteUrl.trim()}` : undefined, config.phoneNumber?.trim() ? `Tel: ${config.phoneNumber.trim()}` : undefined, config.additionalPhoneNumber?.trim() ? `Qo‘shimcha tel: ${config.additionalPhoneNumber.trim()}` : undefined, config.instagramHandle?.trim() ? `Instagram: ${config.instagramHandle.trim()}` : undefined].filter((value): value is string => Boolean(value));
   return parts.join("\n");
 }
 
-function finalPost(body: string, config: BotConfig, officialSourceUrls: string[]): string {
+function finalPost(body: string, config: BotConfig): string {
   const parts = [body.trim(), contactCta(config)];
-  const sources = [...officialSourceUrls, ...config.sourceUrls].filter((value, index, all) => all.indexOf(value) === index).slice(0, 4);
-  if (sources.length) parts.push(`Manbalar:\n${sources.map((url) => `• ${url}`).join("\n")}`);
-  return parts.filter(Boolean).join("\n\n").slice(0, 4096);
+  return parts.filter(Boolean).join("\n\n").slice(0, 950);
 }
 
 function previousFor(topic: string, kind: ContentKind, history: PostHistory): string {
@@ -70,8 +60,8 @@ function previousFor(topic: string, kind: ContentKind, history: PostHistory): st
   return items.length ? items.map((post, index) => `${index + 1}. ${post.content.replace(/\s+/g, " ").slice(0, 380)}`).join("\n") : "Yo‘q";
 }
 
-async function askOpenAi(config: BotConfig, topic: string, kind: ContentKind, history: PostHistory): Promise<GeneratedContent> {
-  const format = kind === "poll" ? "Faqat quyidagi JSONni qaytaring: {\"question\":\"...\",\"options\":[\"...\",\"...\",\"...\"]}. Savol 300 belgidan, har variant 100 belgidan oshmasin; 2-6 variant bo‘lsin." : kind === "info" ? "500 belgidan oshmaydigan qisqa foydali ma’lumot yozing: sarlavha va 2-4 qisqa satr. CTA yoki manba yozmang." : "900 belgidan oshmaydigan foydali post yozing: sarlavha va qisqa, aniq paragraflar. CTA yoki manba yozmang.";
+async function askOpenAi(config: BotConfig, topic: string, kind: ContentKind, history: PostHistory): Promise<string> {
+  const format = kind === "poll" ? "Faqat quyidagi JSONni qaytaring: {\"question\":\"...\",\"options\":[\"...\",\"...\",\"...\"]}. Savol 300 belgidan, har variant 100 belgidan oshmasin; 2-6 variant bo‘lsin." : kind === "info" ? "350 belgidan oshmaydigan qisqa foydali ma’lumot yozing: sarlavha va 2-3 qisqa satr. CTA, manba, havola yozmang." : "Sarlavha va ko‘pi bilan 2 qisqa paragrafdan iborat, 600 belgidan oshmaydigan foydali post yozing. CTA, manba, havola yozmang.";
   const response = await fetch("https://api.openai.com/v1/responses", {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${config.openAiApiKey}` },
@@ -85,7 +75,7 @@ async function askOpenAi(config: BotConfig, topic: string, kind: ContentKind, hi
       tools: [{ type: "web_search", search_context_size: "medium" }],
       tool_choice: "required",
       include: ["web_search_call.action.sources"],
-      instructions: `Siz o‘zbek tilida yozadigan tibbiy kontent muharririsiz. Avval rasmiy tibbiy manbalardan web qidiruv qiling (ustuvor domenlar: ${officialDomains.join(", ")}). Faqat ommaviy ma’rifiy, ehtiyotkor kontent yozing; tashxis, individual davolash yoki dori dozasi bermang. Jiddiy yoki shoshilinch simptomlar bo‘lsa shifokorga yoki tez yordamga murojaat qilishni eslating. Avvalgi kontentdagi burchak, sarlavha va fikrlarni takrorlamang.`,
+      instructions: `Siz o‘zbek tilida yozadigan professional kontent muharririsiz. Mavzu qaysi sohada berilsa, faqat shu sohaga oid, aniq va sodda kontent yozing. Avval ishonchli rasmiy manbalardan web qidiruv qiling (ustuvor domenlar: ${officialDomains.join(", ")}). Faqat sog‘liq mavzusida tashxis, individual davolash yoki dori dozasi bermang. Avvalgi kontentdagi burchak, sarlavha va fikrlarni takrorlamang. Matnda manba, URL yoki iqtibos yozmang.`,
       input: `Mavzu: ${topic}\nKontent turi: ${kind}\n${format}\n\nQuyidagi shu mavzudagi avvalgi postlar allaqachon yuborilgan. Ulardan mutlaqo boshqa kichik mavzu/burchak tanlang:\n${previousFor(topic, kind, history)}`,
     }),
   });
@@ -93,7 +83,20 @@ async function askOpenAi(config: BotConfig, topic: string, kind: ContentKind, hi
   const payload = await response.json() as OpenAiResponse;
   const text = outputText(payload);
   if (!text) throw new Error("OpenAI bo‘sh javob qaytardi.");
-  return { text, sourceUrls: citedUrls(payload) };
+  return text;
+}
+
+async function generateImage(config: BotConfig, topic: string, post: string): Promise<InputFile> {
+  const prompt = `Create a polished square editorial illustration for a Telegram post about “${topic}”. The image must clearly match this Uzbek post’s idea: “${post.slice(0, 500)}”. Modern, clean, relevant visual storytelling, professional lighting and composition. No text, no letters, no numbers, no logos, no watermarks, no brand names, no user-interface elements.`;
+  const response = await fetch("https://api.openai.com/v1/images/generations", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${config.openAiApiKey}` },
+    body: JSON.stringify({ model: "gpt-image-2", prompt, size: "1024x1024", quality: "low", output_format: "jpeg", output_compression: 82 }),
+  });
+  if (!response.ok) throw new Error(`OpenAI image ${response.status}: ${await response.text()}`);
+  const image = (await response.json() as ImageResponse).data?.[0]?.b64_json;
+  if (!image) throw new Error("OpenAI rasm qaytarmadi.");
+  return new InputFile(Buffer.from(image, "base64"), "autopost.jpg");
 }
 
 function parsePoll(text: string): Poll {
@@ -108,12 +111,15 @@ function parsePoll(text: string): Poll {
 async function sendContent(bot: Bot, config: BotConfig, kind: ContentKind, topic: string, history: PostHistory): Promise<string> {
   const generated = await askOpenAi(config, topic, kind, history);
   if (kind === "poll") {
-    const poll = parsePoll(generated.text);
+    const poll = parsePoll(generated);
     await bot.api.sendPoll(config.channelId!, poll.question, poll.options.map((text) => ({ text })), { is_anonymous: true });
     return `${poll.question}\n${poll.options.join(" | ")}`;
   }
-  const post = finalPost(generated.text, config, generated.sourceUrls);
-  await bot.api.sendMessage(config.channelId!, post, { link_preview_options: { is_disabled: true } });
+  const post = finalPost(generated, config);
+  if (kind === "post") {
+    try { await bot.api.sendPhoto(config.channelId!, await generateImage(config, topic, post), { caption: post }); }
+    catch (error) { console.error("scheduled_image_failed", error); await bot.api.sendMessage(config.channelId!, post, { link_preview_options: { is_disabled: true } }); }
+  } else await bot.api.sendMessage(config.channelId!, post, { link_preview_options: { is_disabled: true } });
   return post;
 }
 
