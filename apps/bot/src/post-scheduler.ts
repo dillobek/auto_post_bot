@@ -10,6 +10,7 @@ type PostHistory = { sent: Record<string, true>; posts?: SentContent[]; polls?: 
 type OpenAiResponse = { output_text?: string; output?: Array<{ type?: string; content?: Array<{ type?: string; text?: string }> }> };
 type ImageResponse = { data?: Array<{ b64_json?: string }> };
 type ContentResult = { content: string; pollId?: string; basedOnPollId?: string };
+type ContentContext = { topic: string; opening?: string; basedOnPollId?: string };
 
 const historyPath = process.env.SHIFOKOR_POST_HISTORY_FILE ?? path.resolve(process.cwd(), "../../data/post-history.json");
 
@@ -74,17 +75,15 @@ function pollOpening(poll: PollRecord): string | undefined {
   return "Bu ma’lumot siz o‘ylaganingizdan ko‘ra qiziqarliroq.";
 }
 
-function contentContext(config: BotConfig, history: PostHistory, kind: ContentKind): { topic: string; opening?: string; basedOnPollId?: string } {
+function contentContext(config: BotConfig, history: PostHistory, kind: ContentKind): ContentContext | undefined {
+  if (kind === "post") return { topic: pickTopic(config, history, kind) };
   if (kind === "poll") {
     const previousTopic = latestPostTopic(history);
     return { topic: previousTopic && isActiveTopic(config, previousTopic) ? previousTopic : pickTopic(config, history, kind) };
   }
-  if (kind === "post") {
-    const usedPolls = new Set((history.posts ?? []).flatMap((post) => post.basedOnPollId ? [post.basedOnPollId] : []));
-    const poll = [...(history.polls ?? [])].reverse().find((item) => !usedPolls.has(item.id) && isActiveTopic(config, item.topic) && pollOpening(item));
-    if (poll) return { topic: poll.topic, opening: pollOpening(poll), basedOnPollId: poll.id };
-  }
-  return { topic: pickTopic(config, history, kind) };
+  const usedPolls = new Set((history.posts ?? []).filter((post) => post.kind === "info").flatMap((post) => post.basedOnPollId ? [post.basedOnPollId] : []));
+  const poll = [...(history.polls ?? [])].reverse().find((item) => !usedPolls.has(item.id) && isActiveTopic(config, item.topic) && pollOpening(item));
+  return poll ? { topic: poll.topic, opening: pollOpening(poll), basedOnPollId: poll.id } : undefined;
 }
 
 function outputText(response: OpenAiResponse): string {
@@ -123,10 +122,10 @@ function withoutEngagementLines(value: string): string {
   return value.split("\n").filter((line) => !/(fikringizni|kommentariyada|izoh(?:larda|da)|nima deb o['‘’]ylaysiz)/i.test(line)).join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
-function finalPost(body: string, config: BotConfig): string {
+function finalPost(body: string, config: BotConfig, maxLength: number): string {
   const contacts = contactCta(config);
   const reserved = contacts.length + (contacts ? 2 : 0) + engagementCta.length + 2;
-  const trimmedBody = cutAtSentence(withoutEngagementLines(body), Math.max(300, 950 - reserved));
+  const trimmedBody = cutAtSentence(withoutEngagementLines(body), Math.max(300, maxLength - reserved));
   const parts = [trimmedBody, engagementCta, contacts].filter((value): value is string => Boolean(value));
   return parts.join("\n\n");
 }
@@ -149,18 +148,21 @@ async function askOpenAi(config: BotConfig, topic: string, kind: Exclude<Content
   const domainRule = medicalTopic
     ? "Bu TIBBIY mavzu. Faqat tibbiyotga oid foydali, ehtiyotkor ma’lumot yozing. Tashxis, individual davolash yoki dori dozasi bermang; yakuniy qaror shifokorniki ekanini qisqa va tabiiy ayting."
     : "Bu TIBBIY EMAS mavzu. Sog‘liq, bemor, shifokor, klinika, tashxis, davolash, dori yoki tibbiyotga oid misol va foydani mutlaqo kiritmang. AI yoki AI agent mavzusini texnologiya, ish jarayoni, avtomatlashtirish, mahsuldorlik, xavfsizlik yoki kundalik amaliyot nuqtai nazaridan yoritib bering.";
-  const format = kind === "info" ? "300 belgidan oshmaydigan qisqa foydali ma’lumot yozing: sarlavha va 2 qisqa satr. CTA, manba, havola yozmang." : `520 belgidan oshmaydigan Telegram posti yozing. ${opening ? `Birinchi satr aynan shunday boshlansin: “${opening}”` : "Birinchi satr — qiziqarli, odamlarga tanish savol yoki muammo."} Keyin ko‘pi bilan 2 qisqa paragrafda aniq foyda yozing; har bir gap 160 belgidan oshmasin. Muhokama chaqirig‘i, admin kontaktlari, manba, URL, Markdown yoki HTML yozmang.`;
+  const format = kind === "info"
+    ? `Batafsil Telegram ma’lumotini yozing: ${opening ? `birinchi satr aynan shunday boshlansin: “${opening}”` : "birinchi satr diqqatni tortadigan, tabiiy kirish bo‘lsin."} Keyin 3–4 qisqa paragrafda muammo, sabab va amaliy yo‘lni tushuntiring. 1 200 belgidan oshmang. Muhokama chaqirig‘i, admin kontaktlari, manba, URL, Markdown yoki HTML yozmang.`
+    : "Rasm ostiga qo‘yiladigan 420 belgidan oshmaydigan qisqa Telegram posti yozing. Birinchi satr odamni to‘xtatib o‘qitadigan tabiiy savol yoki holat bo‘lsin. Keyin bir aniq foyda yoki oddiy misolni 2 qisqa paragrafda ayting. Muhokama chaqirig‘i, admin kontaktlari, manba, URL, Markdown yoki HTML yozmang.";
+  const channelContext = config.channelContext?.trim() || "O‘zbek tilidagi amaliy va ishonchli mavzuli kanal.";
   const response = await fetch("https://api.openai.com/v1/responses", {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${config.openAiApiKey}` },
     body: JSON.stringify({
       model: config.openAiModel,
       store: false,
-      max_output_tokens: 750,
+      max_output_tokens: 1200,
       tools: [{ type: "web_search", search_context_size: "medium" }],
       tool_choice: "required",
-      instructions: `# Role\nSiz o‘zbek tilida yozadigan professional Telegram kontent muharririsiz.\n\n# Fact safety\n- Avval web qidiruvdagi dolzarb, ishonchli ma’lumotni tekshiring. Tasdiqlanmagan fakt, statistika yoki vaqtga bog‘liq da’voni yozmang.\n- Agar yangi ma’lumot aniq bo‘lmasa, abadiy (evergreen) va tekshiriladigan umumiy faktni tanlang.\n- ${domainRule}\n\n# Writing rules\n- Mavzu qaysi sohada berilsa, faqat shu sohaga oid, amaliy va sodda kontent yozing; boshqa soha misolini qo‘shmang.\n- Umumiy darslik uslubidagi “muhim rol o‘ynaydi”, “inqilobiy o‘zgarish” kabi bo‘sh iboralarni ishlatmang.\n- Kirish odamni o‘qishni davom ettirishga undasin; fikr bitta ravshan misol yoki foyda orqali tushuntirilsin.\n- Avvalgi kontentdagi burchak, sarlavha va fikrlarni takrorlamang.\n- Matnda manba, URL, admin kontakti, muhokama chaqirig‘i, HTML yoki Markdown yozmang.\n\n# Final instruction\nKo‘rsatilgan chiqish formatiga so‘zsiz amal qiling. Soha turidan tashqariga chiqmang.`,
-      input: `Mavzu: ${topic}\nSoha turi: ${medicalTopic ? "tibbiyot" : "tibbiyot emas"}\nKontent turi: ${kind}\n${format}\n\nQuyidagi shu mavzudagi avvalgi postlar allaqachon yuborilgan. Ulardan mutlaqo boshqa kichik mavzu/burchak tanlang:\n${previousFor(topic, kind, history)}`,
+      instructions: `# Vazifa\nSiz kanal egasi nomidan tabiiy va puxta yozadigan o‘zbek Telegram kopirayterisiz. Matn AI yaratgani bilinmasin.\n\n# Faktlar\n- Avval web qidiruvdagi dolzarb, ishonchli ma’lumotni tekshiring. Tasdiqlanmagan fakt, statistika yoki vaqtga bog‘liq da’voni yozmang.\n- Agar yangi ma’lumot aniq bo‘lmasa, tekshiriladigan umumiy faktni tanlang.\n- ${domainRule}\n\n# Kanal ohangi\n- Kanal konteksti va auditoriyasiga mos yozing. O‘quvchini bevosita, samimiy va hurmat bilan gapga torting.\n- “muhim rol o‘ynaydi”, “inqilobiy o‘zgarish”, “bugungi kunda” kabi sun’iy, darslik uslubidagi iboralarni ishlatmang.\n- Bir aniq holat, muammo yoki kutilmagan savol bilan boshlang; keyin foydani sodda qilib oching. Bo‘rttirma va’dalar bermang.\n- Avvalgi kontentdagi sarlavha, kirish va asosiy fikrni takrorlamang.\n- Matnda manba, URL, admin kontakti, muhokama chaqirig‘i, HTML yoki Markdown yozmang.\n\n# Qat’iy qoida\nKo‘rsatilgan format va soha chegarasiga so‘zsiz amal qiling.`,
+      input: `Mavzu: ${topic}\nSoha turi: ${medicalTopic ? "tibbiyot" : "tibbiyot emas"}\nKanal konteksti: ${channelContext}\nKontent turi: ${kind}\n${format}\n\nQuyidagi shu mavzudagi avvalgi kontent allaqachon yuborilgan. Ulardan mutlaqo boshqa burchak tanlang:\n${previousFor(topic, kind, history)}`,
     }),
   });
   if (!response.ok) throw new Error(`OpenAI ${response.status}: ${await response.text()}`);
@@ -185,15 +187,15 @@ async function generateImage(config: BotConfig, topic: string, post: string): Pr
 
 async function sendContent(bot: Bot, config: BotConfig, kind: ContentKind, topic: string, history: PostHistory, opening?: string, basedOnPollId?: string): Promise<ContentResult> {
   if (kind === "poll") {
-    const question = `“${topic}” mavzusini davom ettirib, amaliy ma’lumot ulashaymi?`;
+    const question = `“${topic}” bo‘yicha batafsil, amaliy ma’lumot ulashaymi?`;
     const sent = await bot.api.sendPoll(config.channelId!, question, [{ text: "Ha" }, { text: "Yo‘q" }, { text: "Qiziq emas" }], { is_anonymous: true });
     if (!sent.poll) throw new Error("Telegram opros ID sini qaytarmadi.");
     return { content: `${question}\nHa | Yo‘q | Qiziq emas`, pollId: sent.poll.id };
   }
   const generated = await askOpenAi(config, topic, kind, history, opening);
-  const post = finalPost(generated, config);
+  const post = finalPost(generated, config, kind === "post" ? 950 : 1_700);
   if (kind === "post") {
-    try { await bot.api.sendPhoto(config.channelId!, await generateImage(config, topic, post), { caption: telegramHtml(post), parse_mode: "HTML" }); }
+    try { await bot.api.sendPhoto(config.channelId!, await generateImage(config, topic, generated), { caption: telegramHtml(post), parse_mode: "HTML" }); }
     catch (error) { console.error("scheduled_image_failed", error); await bot.api.sendMessage(config.channelId!, telegramHtml(post), { parse_mode: "HTML", link_preview_options: { is_disabled: true } }); }
   } else await bot.api.sendMessage(config.channelId!, post, { link_preview_options: { is_disabled: true } });
   return { content: post, basedOnPollId };
@@ -215,10 +217,14 @@ export function startPostScheduler(bot: Bot, getConfig: () => BotConfig, isPause
     const history = await readHistory();
     const next = due.find((item) => !history.sent[`${now.date}-${item.kind}-${item.time}`]);
     if (!next) return;
+    const context = contentContext(config, history, next.kind);
+    if (!context) {
+      console.info("scheduled_content_waiting_for_poll", { kind: next.kind, time: next.time });
+      return;
+    }
     inFlight = true;
     const key = `${now.date}-${next.kind}-${next.time}`;
     try {
-      const context = contentContext(config, history, next.kind);
       const result = await sendContent(bot, config, next.kind, context.topic, history, context.opening, context.basedOnPollId);
       await rememberSent(history, { key, topic: context.topic, kind: next.kind, content: result.content, pollId: result.pollId, basedOnPollId: result.basedOnPollId, createdAt: new Date().toISOString() });
       console.info("scheduled_content_sent", { key, topic: context.topic, kind: next.kind, channelId: config.channelId });

@@ -12,6 +12,7 @@ export type StoredTelegramSettings = {
   openAiApiKey?: string;
   openAiModel?: string;
   contentTopics?: string[];
+  channelContext?: string;
   contentCta?: string;
   ctaAdminUsername?: string;
   websiteUrl?: string;

@@ -19,6 +19,7 @@ const input = z.object({
   openAiApiKey: z.string().trim().min(20, "OpenAI API kaliti formati noto‘g‘ri.").optional(),
   openAiModel: z.enum(["gpt-4.1-mini", "gpt-4.1", "gpt-5-mini"]).optional(),
   contentTopics: z.array(z.string().trim().min(2, "Mavzu kamida 2 belgidan iborat bo‘lsin.").max(120)).max(20).optional(),
+  channelContext: z.string().trim().max(500, "Kanal yo‘nalishi 500 belgidan oshmasin.").optional(),
   contentCta: z.string().trim().max(500, "CTA 500 belgidan oshmasin.").optional(),
   ctaAdminUsername: optionalHandle,
   websiteUrl: optionalUrl,
@@ -41,7 +42,7 @@ export async function POST(request: Request) {
   if (!(await isAdminAuthenticated())) return NextResponse.json({ error: "Kirish talab qilinadi." }, { status: 401 });
   const parsed = input.safeParse(await request.json());
   if (!parsed.success) return NextResponse.json({ error: parsed.error.issues[0]?.message ?? "Sozlama noto‘g‘ri." }, { status: 400 });
-  if (!parsed.data.botToken && parsed.data.channelId === undefined && parsed.data.groupId === undefined && !parsed.data.openAiApiKey && !parsed.data.openAiModel && parsed.data.contentTopics === undefined && parsed.data.contentCta === undefined && parsed.data.ctaAdminUsername === undefined && parsed.data.websiteUrl === undefined && parsed.data.phoneNumber === undefined && parsed.data.additionalPhoneNumber === undefined && parsed.data.instagramHandle === undefined && parsed.data.sourceUrls === undefined && parsed.data.postSchedules === undefined && !parsed.data.adminUsername && !parsed.data.newPassword) return NextResponse.json({ error: "Kamida bitta sozlama kiriting." }, { status: 400 });
+  if (!parsed.data.botToken && parsed.data.channelId === undefined && parsed.data.groupId === undefined && !parsed.data.openAiApiKey && !parsed.data.openAiModel && parsed.data.contentTopics === undefined && parsed.data.channelContext === undefined && parsed.data.contentCta === undefined && parsed.data.ctaAdminUsername === undefined && parsed.data.websiteUrl === undefined && parsed.data.phoneNumber === undefined && parsed.data.additionalPhoneNumber === undefined && parsed.data.instagramHandle === undefined && parsed.data.sourceUrls === undefined && parsed.data.postSchedules === undefined && !parsed.data.adminUsername && !parsed.data.newPassword) return NextResponse.json({ error: "Kamida bitta sozlama kiriting." }, { status: 400 });
   try {
     const current = await readTelegramSettings();
     const next = {
@@ -52,6 +53,7 @@ export async function POST(request: Request) {
       ...(parsed.data.openAiApiKey ? { openAiApiKey: parsed.data.openAiApiKey } : {}),
       ...(parsed.data.openAiModel ? { openAiModel: parsed.data.openAiModel } : {}),
       ...(parsed.data.contentTopics !== undefined ? { contentTopics: parsed.data.contentTopics } : {}),
+      ...(parsed.data.channelContext !== undefined ? { channelContext: parsed.data.channelContext || undefined } : {}),
       ...(parsed.data.contentCta !== undefined ? { contentCta: parsed.data.contentCta || undefined } : {}),
       ...(parsed.data.ctaAdminUsername !== undefined ? { ctaAdminUsername: parsed.data.ctaAdminUsername || undefined } : {}),
       ...(parsed.data.websiteUrl !== undefined ? { websiteUrl: parsed.data.websiteUrl || undefined } : {}),

@@ -8,6 +8,7 @@ type ScheduleKind = "post" | "poll" | "info";
 type PostSchedules = Record<ScheduleKind, ScheduleItem[]>;
 type ContentPlan = {
   contentTopics: string[];
+  channelContext: string;
   ctaAdminUsername: string;
   websiteUrl: string;
   phoneNumber: string;
@@ -18,7 +19,7 @@ type ContentPlan = {
 };
 
 const emptySchedules: PostSchedules = { post: [], poll: [], info: [] };
-const emptyPlan: ContentPlan = { contentTopics: [], ctaAdminUsername: "", websiteUrl: "", phoneNumber: "", additionalPhoneNumber: "", instagramHandle: "", sourceUrls: [], postSchedules: emptySchedules };
+const emptyPlan: ContentPlan = { contentTopics: [], channelContext: "", ctaAdminUsername: "", websiteUrl: "", phoneNumber: "", additionalPhoneNumber: "", instagramHandle: "", sourceUrls: [], postSchedules: emptySchedules };
 const scheduleCopy = (values?: Partial<PostSchedules>): PostSchedules => ({ post: values?.post ?? [], poll: values?.poll ?? [], info: values?.info ?? [] });
 
 function ScheduleSection({ kind, title, description, items, newTime, onNewTimeChange, onChange }: { kind: ScheduleKind; title: string; description: string; items: ScheduleItem[]; newTime: string; onNewTimeChange: (value: string) => void; onChange: (next: ScheduleItem[]) => void }) {
@@ -41,7 +42,7 @@ export function ContentPlanSetup() {
   const [saving, setSaving] = useState(false);
 
   function normalize(value: Partial<ContentPlan> & { postSchedule?: ScheduleItem[] }): ContentPlan {
-    return { ...emptyPlan, ...value, contentTopics: value.contentTopics ?? [], ctaAdminUsername: value.ctaAdminUsername ?? "", websiteUrl: value.websiteUrl ?? "", phoneNumber: value.phoneNumber ?? "", additionalPhoneNumber: value.additionalPhoneNumber ?? "", instagramHandle: value.instagramHandle ?? "", sourceUrls: value.sourceUrls ?? [], postSchedules: scheduleCopy(value.postSchedules ?? { post: value.postSchedule ?? [] }) };
+    return { ...emptyPlan, ...value, contentTopics: value.contentTopics ?? [], channelContext: value.channelContext ?? "", ctaAdminUsername: value.ctaAdminUsername ?? "", websiteUrl: value.websiteUrl ?? "", phoneNumber: value.phoneNumber ?? "", additionalPhoneNumber: value.additionalPhoneNumber ?? "", instagramHandle: value.instagramHandle ?? "", sourceUrls: value.sourceUrls ?? [], postSchedules: scheduleCopy(value.postSchedules ?? { post: value.postSchedule ?? [] }) };
   }
 
   useEffect(() => {
@@ -75,10 +76,12 @@ export function ContentPlanSetup() {
         <h2>Mavzular</h2><p className={styles.scheduleCaption}>Istalgan sohani yozing. Bir nechta mavzuni vergul bilan kiriting: masalan, Kardiologiya, Pulmonologiya.</p>
         <div className={styles.addRow}><input value={topic} onChange={(event) => setTopic(event.target.value)} onKeyDown={(event) => addOnEnter(event, addTopic)} placeholder="Masalan: Kardiologiya, Pulmonologiya" maxLength={120} /><button type="button" className={styles.outlineButton} onClick={addTopic}>Qo‘shish</button></div>
         <div className={styles.tagList}>{plan.contentTopics.length ? plan.contentTopics.map((item) => <span className={styles.tag} key={item}>{item}<button type="button" aria-label={`${item} mavzusini o‘chirish`} onClick={() => setPlan((current) => ({ ...current, contentTopics: current.contentTopics.filter((value) => value !== item) }))}>×</button></span>) : <span className={styles.emptyInline}>Hali mavzu kiritilmagan.</span>}</div>
+        <label>Kanal yo‘nalishi va auditoriyasi <small>(ixtiyoriy)</small><textarea value={plan.channelContext} onChange={(event) => setPlan((current) => ({ ...current, channelContext: event.target.value }))} maxLength={500} placeholder="Masalan: Ota-onalar uchun pediatriya kanali. Sodda, mehribon va amaliy maslahatlar kerak." /></label>
+        <p className={styles.scheduleCaption}>Bu CTA emas. AI mazmun, ohang va misollarni kanal auditoriyasiga moslaydi.</p>
       </section>
-      <ScheduleSection kind="post" title="Post vaqtlari" description="Ta’limiy postlar shu vaqtlarda yuboriladi." items={plan.postSchedules.post} newTime={times.post} onNewTimeChange={(value) => setTimes((current) => ({ ...current, post: value }))} onChange={(values) => changeSchedule("post", values)} />
-      <ScheduleSection kind="poll" title="So‘rovnoma vaqtlari" description="Telegramdagi oproslar shu vaqtlarda yuboriladi." items={plan.postSchedules.poll} newTime={times.poll} onNewTimeChange={(value) => setTimes((current) => ({ ...current, poll: value }))} onChange={(values) => changeSchedule("poll", values)} />
-      <ScheduleSection kind="info" title="Ma’lumot vaqtlari" description="Qisqa foydali ma’lumotlar shu vaqtlarda yuboriladi." items={plan.postSchedules.info} newTime={times.info} onNewTimeChange={(value) => setTimes((current) => ({ ...current, info: value }))} onChange={(values) => changeSchedule("info", values)} />
+      <ScheduleSection kind="post" title="Rasmli post vaqtlari" description="Rasmli, qisqa va CTAli postlar shu vaqtlarda yuboriladi." items={plan.postSchedules.post} newTime={times.post} onNewTimeChange={(value) => setTimes((current) => ({ ...current, post: value }))} onChange={(values) => changeSchedule("post", values)} />
+      <ScheduleSection kind="poll" title="Opros vaqtlari" description="Rasmli postdan keyin Ha / Yo‘q / Qiziq emas opros yuboriladi." items={plan.postSchedules.poll} newTime={times.poll} onNewTimeChange={(value) => setTimes((current) => ({ ...current, poll: value }))} onChange={(values) => changeSchedule("poll", values)} />
+      <ScheduleSection kind="info" title="Batafsil ma’lumot vaqtlari" description="Opros natijasiga qarab, shu mavzuda batafsil ma’lumot yuboriladi." items={plan.postSchedules.info} newTime={times.info} onNewTimeChange={(value) => setTimes((current) => ({ ...current, info: value }))} onChange={(values) => changeSchedule("info", values)} />
       <section className={styles.settingsSection}>
         <h2>Kontaktlar <small>(ixtiyoriy)</small></h2><p className={styles.scheduleCaption}>Kontaktlar post oxiridagi “Biz bilan bog‘lanish” chaqiruvidan keyin chiqadi. Bo‘sh maydon postga qo‘shilmaydi.</p>
         <div className={styles.contactGrid}><label>Admin username<input value={plan.ctaAdminUsername} onChange={(event) => setPlan((current) => ({ ...current, ctaAdminUsername: event.target.value }))} placeholder="@admin" /></label><label>Website<input value={plan.websiteUrl} onChange={(event) => setPlan((current) => ({ ...current, websiteUrl: event.target.value }))} placeholder="https://example.uz" inputMode="url" /></label><label>Telefon raqam<input value={plan.phoneNumber} onChange={(event) => setPlan((current) => ({ ...current, phoneNumber: event.target.value }))} placeholder="+998 90 123 45 67" inputMode="tel" /></label><label>Qo‘shimcha raqam<input value={plan.additionalPhoneNumber} onChange={(event) => setPlan((current) => ({ ...current, additionalPhoneNumber: event.target.value }))} placeholder="+998 90 765 43 21" inputMode="tel" /></label><label>Instagram<input value={plan.instagramHandle} onChange={(event) => setPlan((current) => ({ ...current, instagramHandle: event.target.value }))} placeholder="@clinic" /></label></div>

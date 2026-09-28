@@ -9,6 +9,7 @@ export type TelegramSettings = {
   openAiApiKey?: string;
   openAiModel?: string;
   contentTopics?: string[];
+  channelContext?: string;
   contentCta?: string;
   ctaAdminUsername?: string;
   websiteUrl?: string;
@@ -76,6 +77,7 @@ export function publicTelegramSettings(settings: TelegramSettings) {
     hasOpenAiApiKey: Boolean(settings.openAiApiKey),
     openAiModel: settings.openAiModel ?? "gpt-4.1-mini",
     contentTopics: settings.contentTopics ?? [],
+    channelContext: settings.channelContext ?? "",
     contentCta: settings.contentCta ?? "",
     ctaAdminUsername: settings.ctaAdminUsername ?? "",
     websiteUrl: settings.websiteUrl ?? "",
