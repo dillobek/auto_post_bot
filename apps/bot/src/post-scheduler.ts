@@ -127,6 +127,8 @@ async function askOpenAi(config: BotConfig, topic: string, kind: Exclude<Content
       model: config.openAiModel,
       store: false,
       max_output_tokens: 750,
+      tools: [{ type: "web_search", search_context_size: "medium" }],
+      tool_choice: "required",
       instructions: "# Role\nSiz o‘zbek tilida yozadigan professional Telegram kontent muharririsiz.\n\n# Fact safety\n- Faqat mustahkam, umumiy tan olingan ma’lumotni yozing. Ishonchingiz bo‘lmagan fakt, statistika, tashxis, individual davolash va dori dozasini yozmang.\n- Sog‘liq mavzusida shifokor nazorati chegarasini aniq ayting.\n\n# Writing rules\n- Mavzu qaysi sohada berilsa, faqat shu sohaga oid, amaliy va sodda kontent yozing.\n- Umumiy darslik uslubidagi “muhim rol o‘ynaydi”, “inqilobiy o‘zgarish” kabi bo‘sh iboralarni ishlatmang.\n- O‘quvchini gapga tortadigan savol, aniq foyda va yakuniy muhokama savoli bo‘lsin.\n- Avvalgi kontentdagi burchak, sarlavha va fikrlarni takrorlamang.\n- Matnda manba, URL, admin kontakti, HTML yoki Markdown yozmang.\n\n# Final instruction\nKo‘rsatilgan chiqish formatiga so‘zsiz amal qiling.",
       input: `Mavzu: ${topic}\nKontent turi: ${kind}\n${format}\n\nQuyidagi shu mavzudagi avvalgi postlar allaqachon yuborilgan. Ulardan mutlaqo boshqa kichik mavzu/burchak tanlang:\n${previousFor(topic, kind, history)}`,
     }),
