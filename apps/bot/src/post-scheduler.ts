@@ -208,7 +208,7 @@ async function generateImage(config: BotConfig, topic: string, post: string): Pr
 
 async function sendContent(bot: Bot, config: BotConfig, kind: ContentKind, topic: string, history: PostHistory, opening?: string, basedOnPollId?: string): Promise<ContentResult> {
   if (kind === "poll") {
-    const question = `Yuqoridagi “${topic}” postining davomini — batafsil va amaliy ma’lumotini ulashaymi?`;
+    const question = "Yuqoridagi postning davomini — batafsil va amaliy ma’lumotini ulashaymi?";
     const sent = await bot.api.sendPoll(config.channelId!, question, [{ text: "Ha" }, { text: "Yo‘q" }, { text: "Qiziq emas" }], { is_anonymous: true });
     if (!sent.poll) throw new Error("Telegram opros ID sini qaytarmadi.");
     return { content: `${question}\nHa | Yo‘q | Qiziq emas`, pollId: sent.poll.id };
