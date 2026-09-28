@@ -1,6 +1,7 @@
 import { Bot, Context } from "grammy";
 import { loadConfig } from "./config.js";
 import { classifyTriage, decideModeration, isMedicalQuestion, normalizedText, redactPersonalData } from "./policy.js";
+import { startPostScheduler } from "./post-scheduler.js";
 import { createRuntimeState, incrementMessage, rememberAlert } from "./runtime-store.js";
 
 let config = loadConfig();
@@ -31,7 +32,9 @@ async function checkConnection(ctx: Context): Promise<string> {
     const status = member.status === "administrator" || member.status === "creator" ? "✅" : "⚠️";
     return `${status} ${chatId}: ${member.status}`;
   }));
-  return checks.length ? checks.join("\n") : "Kanal va guruh IDlari sozlanmagan.";
+  const connections = checks.length ? checks.join("\n") : "Kanal va guruh IDlari sozlanmagan.";
+  const schedule = config.postSchedule.filter((item) => item.enabled).map((item) => item.time).join(", ");
+  return `${connections}\n\nAvtopost: ${schedule || "vaqt sozlanmagan"} (Toshkent vaqti)\nMavzular: ${config.contentTopics.length}\nOpenAI: ${config.openAiApiKey ? config.openAiModel : "API key kutilmoqda"}`;
 }
 
 function createBot() {
@@ -77,6 +80,7 @@ function startPollingWhenConfigured() {
   if (pollingStarted) return;
   pollingStarted = true;
   const bot = createBot();
+  startPostScheduler(bot, () => config, () => runtime.paused);
   bot.start({ onStart: (info) => console.info(`@${info.username} polling boshlandi`) });
 }
 

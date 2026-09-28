@@ -3,7 +3,18 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 
 type EncryptedPayload = { iv: string; tag: string; ciphertext: string };
-export type StoredTelegramSettings = { botToken?: string; channelId?: string; groupId?: string };
+export type StoredPostSchedule = { time: string; enabled: boolean };
+export type StoredTelegramSettings = {
+  botToken?: string;
+  channelId?: string;
+  groupId?: string;
+  openAiApiKey?: string;
+  openAiModel?: string;
+  contentTopics?: string[];
+  contentCta?: string;
+  sourceUrls?: string[];
+  postSchedule?: StoredPostSchedule[];
+};
 
 function key(): Buffer | undefined {
   const raw = process.env.CONFIG_ENCRYPTION_KEY;

@@ -11,6 +11,7 @@ export type TelegramSettings = {
   contentTopics?: string[];
   contentCta?: string;
   sourceUrls?: string[];
+  postSchedule?: Array<{ time: string; enabled: boolean }>;
   adminUsername?: string;
   adminPasswordHash?: string;
   updatedAt?: string;
@@ -65,6 +66,7 @@ export function publicTelegramSettings(settings: TelegramSettings) {
     contentTopics: settings.contentTopics ?? [],
     contentCta: settings.contentCta ?? "",
     sourceUrls: settings.sourceUrls ?? [],
+    postSchedule: settings.postSchedule ?? [],
     adminUsername: settings.adminUsername ?? process.env.ADMIN_USERNAME ?? "",
     hasCustomAdminPassword: Boolean(settings.adminPasswordHash),
     updatedAt: settings.updatedAt ?? null,
